@@ -3,22 +3,32 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { Plan } from '../types'
 import {
+  CONFIG_FILE,
   NOT_PLANS,
   PLAN_DIR,
+  configuredDir,
   contextText,
+  folderText,
+  isAbsolute,
   isOpen,
   ordered,
   parsePlan,
   planNameOf,
+  resolvePath,
   saysPhaseDone,
   statusText,
+  tailOf,
 } from './plans'
 
 const PLUGIN = 'plan-tracker'
 const PANE = 'plans'
 /** The mod's own command: `/next-phase [plan]` clears the context and runs the phase skill. */
 const FRESH = 'next-phase'
+/** The mod's own command: `/plans-dir [path]` says where the plans folder is, or sets it for the workspace. */
+const WHERE = 'plans-dir'
 const REFRESH_MS = 5000
+/** How long a plans folder that was found is taken as still the one, before it is looked for again. */
+const LOOK_AGAIN_MS = 30_000
 /** The skills that bind a session to a plan when the person runs them. */
 const SKILL_PROMPT = new RegExp(
   `^\\s*/(?:${PLUGIN}:)?(phase|plan|handoff|questions)(?![\\w:-])\\s*([\\w.-]+)?(?:\\s+(\\d+))?`,
@@ -41,9 +51,24 @@ let sessionStartedAt = 0
 let lastCodeEditAt = 0
 let remindedFor = -1
 let timer: { cancel: () => void } | undefined  // the refresh tick, replaced on reload
-/** The plans folder, absolute, once it has been found, and the directories it was looked for from. */
-let planDir: string | undefined
+/**
+ * The plans folder and what named it: a workspace's config file (`file`), the
+ * mod's `plansDir` option where that is one fixed folder (`option`), a folder
+ * of the option's name found at or above the session's (`found`), or nothing
+ * yet, so the place a first plan would go (`unset`).
+ */
+type Place = { dir: string; from: 'file' | 'option' | 'found' | 'unset'; file?: string }
+let place: Place | undefined
+/** The directories the folder was last looked for from, and when. */
 let lookedFrom = ''
+let lookedAt = 0
+/** The folder the plans on show were listed from. */
+let listedDir = ''
+/** The `plansDir` option: the folder's name where no workspace says otherwise. Set when the mod loads. */
+let defaultDir = PLAN_DIR
+let home: string | undefined
+/** Config files already complained about, so each is named once. */
+const badConfigs = new Set<string>()
 /**
  * What the person types to run the skills that come with the mod. Installed as
  * a plugin they are `plan-tracker:phase`, `plan-tracker:plan` and
@@ -81,56 +106,111 @@ async function findSkills($: Engine): Promise<void> {
   }
 }
 
+async function exists($: Engine, path: string): Promise<boolean> {
+  try {
+    return (await $.fs.exists(path)) === true
+  } catch {
+    return false // A place that cannot be looked at has nothing in it.
+  }
+}
+
+/** The folder a config file names, as written in it, or `null`: no such file, or it names none. */
+async function configAt($: Engine, file: string): Promise<string | null> {
+  if (!(await exists($, file))) return null
+  try {
+    return configuredDir(await $.fs.read(file))
+  } catch {
+    if (!badConfigs.has(file)) {
+      badConfigs.add(file)
+      void $.ui.toast(`plan-tracker: ${file} is not read: it should hold {"plansDir": "<path>"}`)
+    }
+    return null
+  }
+}
+
 /**
- * Where the plans are: `docs/plans` under the session's directory, or under
- * the nearest folder above it. A phase works in a worktree
- * (`<repo>/.claude/worktrees/<name>`) while the plans may sit beside or above
- * the repo, and a session that moves there must not lose sight of them. The
- * folder last found is kept when a later place has none.
+ * Where the plans are. First what a workspace says: from the session's
+ * directory upward, the nearest `.claude/plan-tracker.json` that names a plans
+ * folder. A folder of several repositories that sessions start from says it
+ * once, and it holds in every repository below and in their worktrees, also
+ * where one of them has a `docs/plans` of its own. With no such file: the
+ * option where it is one fixed folder, else the nearest folder of the option's
+ * name (`docs/plans` unless set) at or above the session's directory, so a
+ * phase working in a worktree (`<repo>/.claude/worktrees/<name>`) still finds
+ * the plans above it. The folder last found is kept when a later place has none.
  */
-async function findPlanDir($: Engine): Promise<string | undefined> {
+async function findPlace($: Engine, isForced = false): Promise<Place> {
   let starts: string[]
   try {
     starts = [await $.session.cwd(), await $.session.root()]
   } catch {
-    return planDir
+    return place ?? { dir: defaultDir, from: 'unset' }
   }
-  const key = starts.join('\n')
-  if (key === lookedFrom && planDir) return planDir
+  const key = [...starts, defaultDir].join('\n')
+  let now = 0
+  try {
+    now = await $.clock.now()
+  } catch {
+    now = 0
+  }
+  const isFresh = place && place.from !== 'unset' && key === lookedFrom && now - lookedAt < LOOK_AGAIN_MS
+  if (place && isFresh && !isForced) return place
+  lookedFrom = key
+  lookedAt = now
+  if (home === undefined) {
+    try {
+      home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE')) ?? ''
+    } catch {
+      home = ''
+    }
+  }
+  /** The session's directories and the folders above each, nearest first. */
+  const above: string[] = []
   for (const start of starts) {
     let dir = start.replace(/[\\/]+$/, '')
     for (let up = 0; up < 16 && dir; up++) {
-      const candidate = `${dir}/${PLAN_DIR}`
-      try {
-        if (await $.fs.exists(candidate)) {
-          planDir = candidate
-          lookedFrom = key
-          return candidate
-        }
-      } catch {
-        // A place that cannot be looked at has no plans.
-      }
+      if (!above.includes(dir)) above.push(dir)
       const parent = dir.replace(/[\\/][^\\/]*$/, '')
       if (parent === dir) break
       dir = parent
     }
   }
-  lookedFrom = key
-  return planDir
+  for (const dir of above) {
+    const file = `${dir}/${CONFIG_FILE}`
+    const said = await configAt($, file)
+    if (said) return (place = { dir: resolvePath(dir, said, home), from: 'file', file })
+  }
+  if (isAbsolute(defaultDir)) return (place = { dir: resolvePath('', defaultDir, home), from: 'option' })
+  for (const dir of above) {
+    if (await exists($, `${dir}/${defaultDir}`)) return (place = { dir: `${dir}/${defaultDir}`, from: 'found' })
+  }
+  if (place && place.from !== 'unset' && !isForced) return place
+  return (place = { dir: resolvePath(starts[0]!, defaultDir, home), from: 'unset' })
 }
 
 async function refresh($: Engine): Promise<Plan[]> {
-  const dir = (await findPlanDir($)) ?? PLAN_DIR
+  const { dir } = await findPlace($)
   let entries: { name: string; kind: string; mtimeMs: number }[] = []
   try {
     entries = await $.fs.list(dir)
   } catch {
-    // The folder is not there (the session has moved): what was read last stays on show.
+    // The folder is not there. Where it is the one the plans on show came from (the session has moved), they
+    // stay on show; where it is another (the workspace now names a folder not made yet), there are none.
+    if (listedDir && dir !== listedDir) {
+      listedDir = dir
+      cache.clear()
+      await update($, plansAtom, () => [])
+    }
     await showStatus($)
     return read($, plansAtom)
   }
+  const hasMoved = dir !== listedDir
+  if (hasMoved) {
+    listedDir = dir
+    cache.clear()
+  }
   const files = entries.filter(f => f.kind === 'file' && f.name.endsWith('.md') && !NOT_PLANS.has(f.name))
-  let changed = files.length !== cache.size || files.some(f => !cache.has(f.name))
+  let changed = hasMoved || files.length !== cache.size || files.some(f => !cache.has(f.name))
   const plans: Plan[] = []
   for (const file of files) {
     const known = cache.get(file.name)
@@ -215,11 +295,51 @@ async function askQuestions($: Engine, name: string): Promise<void> {
   }
 }
 
-export const register: Register = on => {
+/** What `/plans-dir` answers: the folder, what named it, and how to change that. */
+function whereText(found: Place, count: number | null): string {
+  const why =
+    found.from === 'file'
+      ? `set in ${found.file}`
+      : found.from === 'option'
+        ? "the mod's plansDir option"
+        : found.from === 'found'
+          ? `the nearest ${defaultDir}/ at or above the session's folder`
+          : `no plans folder found yet: this is where a first plan would go`
+  const holds = count === null ? 'It is not there yet: the first plan written makes it.' : `${count} plan${count === 1 ? '' : 's'} in it.`
+  return (
+    `Plans folder: ${found.dir}/ (${why}). ${holds}\n` +
+    `/${WHERE} <path> sets it for this workspace (a path relative to the workspace's folder, or absolute); /${WHERE} reset takes that back.`
+  )
+}
+
+/** How many plans the folder holds, or `null` when it is not there. */
+async function countPlans($: Engine, dir: string): Promise<number | null> {
+  try {
+    const entries = await $.fs.list(dir)
+    return entries.filter(f => f.kind === 'file' && f.name.endsWith('.md') && !NOT_PLANS.has(f.name)).length
+  } catch {
+    return null
+  }
+}
+
+export const register: Register = (on, options) => {
+  // The option is the folder's name where no workspace says otherwise; a change to it loads the mod again.
+  const wanted = typeof options?.plansDir === 'string' ? options.plansDir.trim().replace(/[\\/]+$/, '') : ''
+  defaultDir = wanted || PLAN_DIR
+
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     sessionStartedAt = await $.clock.now()
-    await $.command.register({ name: 'plans', description: 'Show or hide the pane of project plans in docs/plans/' })
+    await $.command.register({ name: 'plans', description: 'Show or hide the pane of project plans' })
+    try {
+      await $.command.register({
+        name: WHERE,
+        description: 'Say where the plans folder is, or set it for this workspace',
+        argumentHint: '[path | reset]',
+      })
+    } catch {
+      // Without the command the config file can still be written by hand.
+    }
     let hidden = false
     try {
       hidden = (await $.store.get(HIDDEN_KEY)) === true
@@ -301,6 +421,40 @@ export const register: Register = on => {
     }
   })
 
+  // `/plans-dir`: where the plans folder is and what named it. With a path, the workspace's config file is
+  // written: the one already in force, else a new one in the session's folder. `reset` takes the entry out.
+  on('command.run', { command: WHERE }, async ($, e) => {
+    const asked = (e.args ?? '').trim().replace(/^(['"])(.*)\1$/, '$2')
+    let file: string | undefined
+    if (asked) {
+      const before = await findPlace($, true)
+      file = before.from === 'file' ? before.file : undefined
+      if (!file && asked === 'reset') {
+        return { text: `No workspace setting to take back.\n${whereText(before, await countPlans($, before.dir))}` }
+      }
+      try {
+        file ??= `${(await $.session.root()).replace(/[\\/]+$/, '')}/${CONFIG_FILE}`
+        let config: Record<string, unknown> = {}
+        try {
+          const old: unknown = JSON.parse(await $.fs.read(file))
+          if (old && typeof old === 'object' && !Array.isArray(old)) config = { ...(old as Record<string, unknown>) }
+        } catch {
+          config = {} // No file yet, or one that could not be read: it is written anew.
+        }
+        if (asked === 'reset') delete config.plansDir
+        else config.plansDir = asked
+        await $.fs.write(file, `${JSON.stringify(config, null, 2)}\n`)
+        badConfigs.delete(file)
+      } catch (err) {
+        return { text: `The plans folder was not set: ${err instanceof Error ? err.message : String(err)}` }
+      }
+    }
+    const found = await findPlace($, true)
+    await refresh($)
+    const wrote = asked ? `${asked === 'reset' ? 'Taken out of' : 'Written to'} ${file}. ` : ''
+    return { text: wrote + whereText(found, await countPlans($, found.dir)) }
+  })
+
   // `/next-phase [plan]`: with no name, the session's own plan, else the only active one.
   on('command.run', { command: FRESH }, async ($, e) => {
     const plans = await refresh($)
@@ -321,23 +475,33 @@ export const register: Register = on => {
   })
 
   // Every new conversation (startup, /clear, resume, compaction) is told
-  // which plans are open, once, so "continue <plan>" is enough.
+  // which plans are open and which folder they are in, once, so "continue
+  // <plan>" is enough. With none open it is told the folder alone, where a
+  // workspace or the option has set one: the skills cannot work that out.
   on('classic.SessionStart', async ($, e, next) => {
     const result = await next(e)
     await findSkills($)
-    const text = contextText(await refresh($), skill)
+    const plans = await refresh($)
+    const found = await findPlace($)
+    const isSet = found.from === 'file' || found.from === 'option' || defaultDir !== PLAN_DIR
+    const text = contextText(plans, skill, found.dir) ?? (isSet ? folderText(found.dir) : null)
     if (!text) return result
     return { ...result, additionalContext: [...(result.additionalContext ?? []), text] }
   })
 
   // `/phase <name>`, `/plan <name>`, `/handoff <name>` or `/questions <name>`
   // (each also as `/plan-tracker:<skill>`) binds the session to a plan, and
-  // the first two title it after the plan and phase.
+  // the first two title it after the plan and phase. The skill is told the
+  // plans folder with it.
   on('classic.UserPromptSubmit', async ($, e, next) => {
-    const result = await next(e)
+    const answered = await next(e)
     const m = SKILL_PROMPT.exec(e.prompt)
-    if (!m) return result
+    if (!m) return answered
     const plans = await refresh($)
+    const found = await findPlace($)
+    const result = isAbsolute(found.dir)
+      ? { ...answered, additionalContext: [...(answered.additionalContext ?? []), folderText(found.dir)] }
+      : answered
     let name = m[2] ?? null
     if (!name) {
       const open = plans.filter(p => p.status === 'active')
@@ -359,14 +523,14 @@ export const register: Register = on => {
       const path =
         e.tool === 'Edit' || e.tool === 'Write' ? e.file_path : e.tool === 'NotebookEdit' ? e.notebook_path : undefined
       if (path && ran.deny === undefined && !ran.isError) {
-        const plan = planNameOf(path)
+        const plan = planNameOf(path, place?.dir ?? defaultDir)
         if (plan) {
           if (!(await read($, currentAtom))) await follow($, plan)
           await refresh($)
         } else {
           lastCodeEditAt = await $.clock.now()
         }
-      } else if (e.tool === 'Bash' && /docs\/plans\//.test(e.command)) {
+      } else if (e.tool === 'Bash' && e.command.includes(`${tailOf(place?.dir ?? defaultDir)}/`)) {
         await refresh($)
       }
     } catch {
@@ -390,7 +554,7 @@ export const register: Register = on => {
     return {
       ...result,
       block:
-        `plan-tracker: you said a phase is done, but ${PLAN_DIR}/${current}.md hasn't changed since the work. ` +
+        `plan-tracker: you said a phase is done, but ${place?.dir ?? defaultDir}/${current}.md hasn't changed since the work. ` +
         "Update it as the phase skill's step 7 says (the phase heading, Notes, Decisions, Next, Open questions and the header), then finish. " +
         "If the phase isn't finished, just say so and stop.",
     }
@@ -425,7 +589,7 @@ export const register: Register = on => {
     if (!plans.length) {
       return (
         <Box flexDirection="column">
-          <Text dimColor>No plans in {PLAN_DIR}/ yet.</Text>
+          <Text dimColor wrap="wrap">No plans in {tailOf(place?.dir ?? defaultDir)}/ yet.</Text>
           <Text dimColor>Start one with /{skill.plan} &lt;name&gt;.</Text>
         </Box>
       )
@@ -497,6 +661,9 @@ export const register: Register = on => {
           )
         })}
         {done.length ? <Text dimColor wrap="wrap">Done: {done.map(p => p.name).join(', ')}</Text> : null}
+        <Text dimColor wrap="truncate-end">
+          In {tailOf(place?.dir ?? defaultDir)}/ (/{WHERE})
+        </Text>
       </Box>
     )
   })

@@ -1,7 +1,15 @@
 {
   "name": "plan-tracker",
-  "version": "0.3.0",
-  "description": "Multi-phase project plans in docs/plans/, one phase per session. Skills write a plan, run a phase, put its open questions to you, hand off and clean up; a pane shows the plans, names sessions after their plan and phase, starts the next phase in a cleared context (a button, or /next-phase), and reminds Claude to update a plan when it finishes a phase",
+  "version": "0.4.0",
+  "description": "Multi-phase project plans in docs/plans/ or a folder you name, one phase per session. Skills write a plan, run a phase, put its open questions to you, hand off and clean up; a pane shows the plans, names sessions after their plan and phase, starts the next phase in a cleared context (a button, or /next-phase), and reminds Claude to update a plan when it finishes a phase",
   "author": { "name": "jjoneson" },
-  "types": "./types/index.d.ts"
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "plansDir": {
+      "type": "string",
+      "title": "Plans folder",
+      "description": "Where plans are kept in a workspace that does not say (see /plans-dir). A relative path, such as docs/plans, is looked for in the session's folder and each folder above it. An absolute path, or one that starts with ~, is one folder for every project.",
+      "default": "docs/plans"
+    }
+  }
 }

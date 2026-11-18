@@ -1,6 +1,15 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { contextText, parsePlan, saysPhaseDone } from '../hooks/plans'
+import {
+  configuredDir,
+  contextText,
+  isAbsolute,
+  parsePlan,
+  planNameOf,
+  resolvePath,
+  saysPhaseDone,
+  tailOf,
+} from '../hooks/plans'
 
 const PLAN = `---
 project: docs-site
@@ -312,6 +321,187 @@ test("while the commands cannot be listed, the mod's own folder says the skills 
 
   const told = await $.classic.SessionStart({ source: 'startup' })
   expect((told.additionalContext ?? []).join('\n')).toContain('Run a phase with /plan-tracker:phase <name>.')
+})
+
+test('a plans folder is worked out from a base, a home and what a config file says', async () => {
+  expect(resolvePath('/work', 'platform-docs/plans')).toBe('/work/platform-docs/plans')
+  expect(resolvePath('/work/api', '../platform-docs/./plans/')).toBe('/work/platform-docs/plans')
+  expect(resolvePath('/work', '/shared/plans')).toBe('/shared/plans')
+  expect(resolvePath('/work', '~/notes/plans', '/home/u')).toBe('/home/u/notes/plans')
+  expect(resolvePath('C:\\work', 'docs\\plans')).toBe('C:/work/docs/plans')
+  expect(isAbsolute('docs/plans')).toBe(false)
+  expect(isAbsolute('~/plans')).toBe(true)
+  expect(tailOf('/work/platform-docs/plans/')).toBe('platform-docs/plans')
+
+  expect(configuredDir('{ "plansDir": " platform-docs/plans " }')).toBe('platform-docs/plans')
+  expect(configuredDir('{}')).toBe(null)
+  expect(() => configuredDir('{ "plansDir": 3 }')).toThrow()
+  expect(() => configuredDir('not json')).toThrow()
+
+  // A plan is a file right in the plans folder, wherever that folder is.
+  expect(planNameOf('/repo/docs/plans/docs-site.md')).toBe('docs-site')
+  expect(planNameOf('/repo/docs/plans/TEMPLATE.md')).toBe(null)
+  expect(planNameOf('/work/platform-docs/plans/docs-site.md', '/work/platform-docs/plans')).toBe('docs-site')
+  expect(planNameOf('/work/platform-docs/plans/old/docs-site.md', '/work/platform-docs/plans')).toBe(null)
+  expect(planNameOf('/work/api/docs/plans/docs-site.md', '/work/platform-docs/plans')).toBe(null)
+  expect(contextText([parsePlan('docs-site', PLAN, 1)], undefined, '/work/platform-docs/plans')).toContain(
+    'Open project plans in /work/platform-docs/plans/ ',
+  )
+})
+
+/** A folder of several repositories that sessions start from: its config file names the plans folder. */
+const WORK = '/work'
+const CONFIG = `${WORK}/.claude/plan-tracker.json`
+const DOCS_PLANS = `${WORK}/platform-docs/plans`
+
+test('a folder of several repositories names its plans folder, and a session there or in a worktree below reads it', async ($, on) => {
+  mock.clock(on, { now: 10_000 })
+  let here = WORK
+  const listed: string[] = []
+  on('session.cwd', () => ({ value: here }))
+  on('session.root', () => ({ value: here }))
+  // One of the repositories has a docs/plans of its own, in its checkout and in its worktrees: what the
+  // workspace says still holds there.
+  on('fs.exists', (_, e) => ({ value: e.path === CONFIG || e.path.endsWith('/docs/plans') }))
+  on('fs.read', (_, e) => ({ value: e.path === CONFIG ? '{ "plansDir": "platform-docs/plans" }' : PLAN }))
+  on('fs.list', (_, e) => {
+    listed.push(e.path)
+    return {
+      value:
+        e.path === DOCS_PLANS ? [{ name: 'docs-site.md', kind: 'file', size: PLAN.length, mtimeMs: 5_000, isLink: false }] : [],
+    }
+  })
+  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.status', () => ({ value: undefined }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('classic.SessionStart', () => ({}))
+  on('classic.UserPromptSubmit', () => ({}))
+  on('classic.Stop', () => ({}))
+
+  await $.session.start({ cwd: WORK, surface: 'terminal', isInteractive: true })
+  expect(listed).toContain(DOCS_PLANS)
+
+  // A new conversation is told the folder, and so is a skill when it is run.
+  const told = await $.classic.SessionStart({ source: 'startup' })
+  expect((told.additionalContext ?? []).join('\n')).toContain(`Open project plans in ${DOCS_PLANS}/ `)
+  const ran = await $.classic.UserPromptSubmit({ prompt: '/phase docs-site' })
+  expect((ran.additionalContext ?? []).join('\n')).toContain(`plans folder is ${DOCS_PLANS}/`)
+  expect(ran.sessionTitle).toBe('docs-site · phase 2')
+
+  // The reminder about a stale plan names the file where it is.
+  const done = { stop_hook_active: false, last_assistant_message: 'Phase 2 is done.' }
+  expect((await $.classic.Stop(done)).block).toContain(`${DOCS_PLANS}/docs-site.md`)
+
+  // The pane says which folder it reads.
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /In platform-docs\/plans\/ \(\/plans-dir\)/ })).toBeDefined()
+  await ui.unmount()
+
+  // In a worktree of one of the repositories the same folder is found from above.
+  here = `${WORK}/api/.claude/worktrees/x`
+  listed.length = 0
+  const again = await $.classic.SessionStart({ source: 'clear' })
+  expect((again.additionalContext ?? []).join('\n')).toContain(`Open project plans in ${DOCS_PLANS}/ `)
+  expect(listed).toContain(DOCS_PLANS)
+})
+
+test('the plansDir option names the folder to look for', { options: { plansDir: 'plans/' } }, async ($, on) => {
+  mock.clock(on, { now: 10_000 })
+  const listed: string[] = []
+  on('session.cwd', () => ({ value: `${WORK}/api` }))
+  on('session.root', () => ({ value: `${WORK}/api` }))
+  on('fs.exists', (_, e) => ({ value: e.path === `${WORK}/plans` }))
+  on('fs.read', () => ({ value: PLAN.replace('status: active', 'status: done') }))
+  on('fs.list', (_, e) => {
+    listed.push(e.path)
+    return { value: [{ name: 'docs-site.md', kind: 'file', size: PLAN.length, mtimeMs: 5_000, isLink: false }] }
+  })
+  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.status', () => ({ value: undefined }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('classic.SessionStart', () => ({}))
+
+  await $.session.start({ cwd: `${WORK}/api`, surface: 'terminal', isInteractive: true })
+  expect(listed).toEqual([`${WORK}/plans`])
+
+  // With no plan open, a new conversation is still told a folder that is not the usual one.
+  const told = await $.classic.SessionStart({ source: 'startup' })
+  expect((told.additionalContext ?? []).join('\n')).toBe(
+    `plan-tracker: this project's plans folder is ${WORK}/plans/. Plans are read from there and new ones are written there.`,
+  )
+})
+
+test('an option that is one fixed folder is used wherever the session is', { options: { plansDir: '/shared/plans' } }, async ($, on) => {
+  mock.clock(on, { now: 10_000 })
+  const listed: string[] = []
+  on('session.cwd', () => ({ value: `${WORK}/api` }))
+  on('session.root', () => ({ value: `${WORK}/api` }))
+  on('fs.exists', () => ({ value: false }))
+  on('fs.read', () => ({ value: PLAN }))
+  on('fs.list', (_, e) => {
+    listed.push(e.path)
+    return { value: [] }
+  })
+  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.status', () => ({ value: undefined }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+
+  await $.session.start({ cwd: `${WORK}/api`, surface: 'terminal', isInteractive: true })
+  expect(listed).toEqual(['/shared/plans'])
+})
+
+test('/plans-dir says where the plans folder is, sets it for the workspace and takes that back', async ($, on) => {
+  mock.clock(on, { now: 10_000 })
+  const files = new Map<string, string>()
+  on('session.cwd', () => ({ value: WORK }))
+  on('session.root', () => ({ value: WORK }))
+  on('fs.exists', (_, e) => ({ value: files.has(e.path) }))
+  on('fs.read', (_, e) => {
+    const text = files.get(e.path)
+    if (text === undefined) throw new Error('no such file')
+    return { value: text }
+  })
+  on('fs.write', (_, e) => {
+    files.set(e.path, e.text)
+    return { value: undefined }
+  })
+  on('fs.list', (_, e) => {
+    if (e.path !== DOCS_PLANS) throw new Error('no such folder')
+    return { value: [{ name: 'docs-site.md', kind: 'file', size: PLAN.length, mtimeMs: 5_000, isLink: false }] }
+  })
+  files.set(`${DOCS_PLANS}/docs-site.md`, PLAN)
+  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.status', () => ({ value: undefined }))
+  on('ui.toast', () => ({ value: undefined }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+
+  await $.session.start({ cwd: WORK, surface: 'terminal', isInteractive: true })
+
+  // Nothing set and nothing found: the place a first plan would go, and no plans.
+  const before = (await $.command.run(typed('plans-dir'))).text ?? ''
+  expect(before).toContain(`Plans folder: ${WORK}/docs/plans/ (no plans folder found yet`)
+  expect(before).toContain('It is not there yet')
+  expect((await $.command.run(typed('plans-dir', 'reset'))).text).toContain('No workspace setting to take back.')
+
+  // Set: written to the folder the session started in, and read from there at once.
+  const set = (await $.command.run(typed('plans-dir', 'platform-docs/plans'))).text ?? ''
+  expect(JSON.parse(files.get(CONFIG) ?? '{}')).toEqual({ plansDir: 'platform-docs/plans' })
+  expect(set).toContain(`Written to ${CONFIG}. Plans folder: ${DOCS_PLANS}/ (set in ${CONFIG}). 1 plan in it.`)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /docs-site/ })).toBeDefined()
+  await ui.unmount()
+
+  // Taken back: the entry leaves the file, and the plans that were on show go with it.
+  const reset = (await $.command.run(typed('plans-dir', 'reset'))).text ?? ''
+  expect(JSON.parse(files.get(CONFIG) ?? 'null')).toEqual({})
+  expect(reset).toContain(`Taken out of ${CONFIG}. Plans folder: ${WORK}/docs/plans/`)
+  const after = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await after.find({ type: 'Text', text: /No plans in docs\/plans\/ yet/ })).toBeDefined()
+  await after.unmount()
 })
 
 const BAND = {

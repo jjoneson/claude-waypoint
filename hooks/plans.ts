@@ -1,7 +1,56 @@
 import type { PhaseInfo, PhaseState, Plan } from '../types'
 
-/** Where the plans live, relative to the session's directory. */
+/** Where plans are kept when neither a workspace nor the mod's option says otherwise, relative to the session's directory. */
 export const PLAN_DIR = 'docs/plans'
+
+/**
+ * A workspace's own word on where its plans are: `{ "plansDir": "<path>" }`,
+ * the path relative to the folder that holds `.claude`. It is for a folder of
+ * several repositories that sessions start from, where the plans live in one
+ * of the repositories or beside them.
+ */
+export const CONFIG_FILE = '.claude/plan-tracker.json'
+
+/** Whether a path names one place wherever it is read from: `/x`, `~/x`, `C:\x`. */
+export function isAbsolute(path: string): boolean {
+  return /^(?:[\\/]|~(?:[\\/]|$)|[A-Za-z]:[\\/])/.test(path)
+}
+
+/**
+ * `path` as one absolute path with forward slashes: under `base` when it is
+ * relative, under `home` when it starts with `~`, with `.` and `..` worked out
+ * and no slash at the end.
+ */
+export function resolvePath(base: string, path: string, home = ''): string {
+  let full = path.replace(/\\/g, '/')
+  if (/^~(?:\/|$)/.test(full) && home) full = `${home.replace(/\\/g, '/')}${full.slice(1)}`
+  else if (!isAbsolute(full)) full = `${base.replace(/\\/g, '/')}/${full}`
+  const lead = /^(?:[A-Za-z]:)?\//.exec(full)?.[0] ?? ''
+  const parts: string[] = []
+  for (const part of full.slice(lead.length).split('/')) {
+    if (part === '' || part === '.') continue
+    if (part === '..') parts.pop()
+    else parts.push(part)
+  }
+  return lead + parts.join('/')
+}
+
+/**
+ * The folder a workspace's config file names, as written there; `null` when
+ * the file names none. Throws when the file is not JSON or the value is not text.
+ */
+export function configuredDir(text: string): string | null {
+  const said: unknown = JSON.parse(text)
+  const dir = said && typeof said === 'object' ? (said as { plansDir?: unknown }).plansDir : undefined
+  if (dir === undefined || dir === null || dir === '') return null
+  if (typeof dir !== 'string') throw new Error('plansDir is not text')
+  return dir.trim() || null
+}
+
+/** The last two folders of a path, for a line with little room: `platform-docs/plans`. */
+export function tailOf(dir: string): string {
+  return dir.replace(/\\/g, '/').replace(/\/+$/, '').split('/').slice(-2).join('/')
+}
 
 /** Files in the plan folder that are not plans. */
 export const NOT_PLANS = new Set(['TEMPLATE.md', 'README.md'])
@@ -50,11 +99,18 @@ export function parsePlan(name: string, text: string, mtimeMs: number): Plan {
   }
 }
 
-/** The plan name in a path such as `/repo/docs/plans/docs-site.md`. */
-export function planNameOf(path: string): string | null {
-  const m = /(?:^|[\\/])docs[\\/]plans[\\/]([^\\/]+)\.md$/.exec(path)
-  if (!m || NOT_PLANS.has(`${m[1]}.md`)) return null
-  return m[1]!
+/**
+ * The plan name in a path such as `/repo/docs/plans/docs-site.md`, when the
+ * file sits right in the plans folder `dir`. An absolute `dir` is that one
+ * folder; a relative one is a folder of that name anywhere.
+ */
+export function planNameOf(path: string, dir: string = PLAN_DIR): string | null {
+  const m = /^(.*?)\/?([^/]+)\.md$/.exec(path.replace(/\\/g, '/'))
+  if (!m || NOT_PLANS.has(`${m[2]}.md`)) return null
+  const folder = m[1]!
+  const wanted = dir.replace(/\\/g, '/').replace(/\/+$/, '')
+  const isIn = folder === wanted || (!isAbsolute(wanted) && folder.endsWith(`/${wanted}`))
+  return isIn ? m[2]! : null
 }
 
 /** Open plans first (the session's own at the top), finished ones last. */
@@ -80,10 +136,14 @@ export function statusText(plan: Plan): string {
 /** What the person types to run the phase skill and the questions skill, without the slash. */
 export type SkillNames = { phase: string; questions: string }
 
-/** What a new session is told about the plans that are still open, with the skills' names as this install has them. */
+/**
+ * What a new session is told about the plans that are still open, with the
+ * skills' names as this install has them and the folder the plans are in.
+ */
 export function contextText(
   plans: readonly Plan[],
   skills: SkillNames = { phase: 'phase', questions: 'questions' },
+  dir: string = PLAN_DIR,
 ): string | null {
   const open = plans.filter(isOpen)
   if (!open.length) return null
@@ -93,13 +153,18 @@ export function contextText(
     return `- ${p.name} (${p.title}): ${p.status}, ${where}${asks}. Next: ${p.next || 'see the plan'}`
   })
   return [
-    'Open project plans in docs/plans/ (from the plan-tracker mod):',
+    `Open project plans in ${dir}/ (from the plan-tracker mod; that is this project's plans folder):`,
     ...lines,
     `Run a phase with /${skills.phase} <name>. The plan file is the hand-off between sessions.`,
     ...(open.some(p => p.questions > 0)
       ? [`Go through a plan's open questions with the user, and record the answers, with /${skills.questions} <name>.`]
       : []),
   ].join('\n')
+}
+
+/** What Claude is told where the plans folder is not the usual one and there is nothing else to say about it. */
+export function folderText(dir: string): string {
+  return `plan-tracker: this project's plans folder is ${dir}/. Plans are read from there and new ones are written there.`
 }
 
 /** Whether a message says a phase is finished. */

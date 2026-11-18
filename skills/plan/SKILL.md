@@ -1,6 +1,6 @@
 ---
 name: plan
-description: Start or revise a multi-phase project plan in docs/plans/<name>.md. Use when the user wants to plan work that will take more than one session, or to change an existing plan.
+description: Start or revise a multi-phase project plan, <name>.md in the project's plans folder (docs/plans/ unless set otherwise). Use when the user wants to plan work that will take more than one session, or to change an existing plan.
 argument-hint: <project-name> [what it is about]
 ---
 
@@ -8,8 +8,17 @@ argument-hint: <project-name> [what it is about]
 
 Arguments: $ARGUMENTS
 
+**The plans folder.** Plans are `<name>.md` files in one folder. It is the
+folder the plan-tracker mod names in this conversation: in its note at the
+start, or beside this command. If nothing names it, find it yourself: the
+nearest `.claude/plan-tracker.json` at or above the working directory whose
+`plansDir` names it (a path relative to the folder that holds `.claude`);
+with no such file, the nearest `docs/plans/` folder at or above it. With
+neither, a new plan goes in `docs/plans/` under the working directory, which
+you make.
+
 1. **Name the plan.** Use the first argument as the file name, in kebab-case:
-   `docs/plans/<name>.md`. If that file exists, this is a revision: read it
+   `<name>.md` in the plans folder. If that file exists, this is a revision: read it
    and change only what the user wants changed.
 2. **Learn just enough.** Start from the project's CLAUDE.md and README. If
    you need a map of the code, send one Explore agent rather than reading
@@ -21,8 +30,8 @@ Arguments: $ARGUMENTS
      a natural point for the user to look at it (a screenshot, a try-out, a
      diff). If a phase would need several review rounds, split it.
    - Put risky or uncertain work early, so later phases build on what's proven.
-4. **Write the plan** from the template: the project's own
-   `docs/plans/TEMPLATE.md` where there is one, else
+4. **Write the plan** from the template: the project's own, `TEMPLATE.md` in
+   the plans folder, where there is one, else
    `${CLAUDE_SKILL_DIR}/TEMPLATE.md`. Fill in the header: `project` is the
    name, `status: planning` until the user approves the plan (then `active`),
    `phase: 1`, `phases` is the count, `next` is one line, and `updated` is

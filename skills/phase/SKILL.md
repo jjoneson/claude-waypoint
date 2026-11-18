@@ -1,6 +1,6 @@
 ---
 name: phase
-description: Run the next phase of a project plan in docs/plans/. Use when the user says /phase <name>, "continue <project>", or "do phase N of <project>".
+description: Run the next phase of a project plan in the project's plans folder (docs/plans/ unless set otherwise). Use when the user says /phase <name>, "continue <project>", or "do phase N of <project>".
 argument-hint: <project-name> [phase number]
 ---
 
@@ -8,7 +8,14 @@ argument-hint: <project-name> [phase number]
 
 Arguments: $ARGUMENTS
 
-1. **Find the plan:** `docs/plans/<name>.md`. With no name, list the plans
+**The plans folder.** Plans are `<name>.md` files in one folder. It is the
+folder the plan-tracker mod names in this conversation: in its note at the
+start, or beside this command. If nothing names it, find it yourself: the
+nearest `.claude/plan-tracker.json` at or above the working directory whose
+`plansDir` names it (a path relative to the folder that holds `.claude`);
+with no such file, the nearest `docs/plans/` folder at or above it.
+
+1. **Find the plan:** `<name>.md` in the plans folder. With no name, list the plans
    whose header says `status: active` or `planning`. Use the only one, or ask
    which.
 2. **Read the whole plan,** Decisions and Open questions included. If an open

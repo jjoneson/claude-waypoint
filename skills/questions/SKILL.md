@@ -1,6 +1,6 @@
 ---
 name: questions
-description: Go through a plan's open questions with the user, one after another in a question dialog with a "Skip for now" choice, and write each answer into the plan in docs/plans/. Use when the user says /questions, "answer the open questions", "what is this plan waiting on me for", or wants to see a plan's open questions.
+description: Go through a plan's open questions with the user, one after another in a question dialog with a "Skip for now" choice, and write each answer into the plan in the project's plans folder (docs/plans/ unless set otherwise). Use when the user says /questions, "answer the open questions", "what is this plan waiting on me for", or wants to see a plan's open questions.
 argument-hint: [project-name]
 ---
 
@@ -8,8 +8,15 @@ argument-hint: [project-name]
 
 Arguments: $ARGUMENTS
 
+**The plans folder.** Plans are `<name>.md` files in one folder. It is the
+folder the plan-tracker mod names in this conversation: in its note at the
+start, or beside this command. If nothing names it, find it yourself: the
+nearest `.claude/plan-tracker.json` at or above the working directory whose
+`plansDir` names it (a path relative to the folder that holds `.claude`);
+with no such file, the nearest `docs/plans/` folder at or above it.
+
 1. **Find the plan:** the name given, else the plan this session has been
-   working on, else the only plan in `docs/plans/` that is not `done` and has
+   working on, else the only plan in the plans folder that is not `done` and has
    open questions. With several and no name, ask which.
 2. **Read the whole plan.** The questions are the bullets under
    `## Open questions`, in the order they stand. Struck-through bullets and a

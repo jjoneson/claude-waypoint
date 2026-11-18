@@ -1,8 +1,9 @@
 # plan-tracker
 
 A mod for Claude Code that runs long work as a plan of phases, one phase per
-session. The plan is a Markdown file in your project, `docs/plans/<name>.md`,
-and it is the hand-off between sessions: each phase starts in a cleared
+session. The plan is a Markdown file in your project, `docs/plans/<name>.md`
+unless you [put plans elsewhere](#where-plans-are-kept), and it is the
+hand-off between sessions: each phase starts in a cleared
 conversation, reads the plan, does one phase, and writes back what it did and
 what comes next.
 
@@ -51,6 +52,7 @@ without installing, clone the repository and run
 | `/plan-tracker:handoff [name]` | Mid-phase: writes where things stand into the plan, so a fresh session can pick it up. |
 | `/plan-tracker:cleanup [worktree names]` | After a phase done in a worktree: merges its branch into the base branch, stops the servers it left running, removes the worktree. |
 | `/plans` | Shows or hides the Plans pane. |
+| `/plans-dir [path \| reset]` | Says where the plans folder is and what named it. With a path, sets it for the workspace. |
 
 A usual round:
 
@@ -87,14 +89,56 @@ the plan is changed.
   the session after the plan and phase.
 - **A plan left stale.** When Claude says a phase is done and the plan file
   has not changed since the work, it is sent back once to update the plan.
-- **Where plans are looked for.** `docs/plans/` under the session's
-  directory, or under the nearest folder above it, so a session working in a
-  worktree still sees the project's plans.
+- **The plans folder.** Found from the session's directory upward, so a
+  session working in a worktree still sees the project's plans, and told to
+  Claude so the skills read and write the same folder. See the next section.
+
+## Where plans are kept
+
+With nothing set, plans are in `docs/plans/` in the folder the session runs
+in, or in the nearest folder above it that has one.
+
+**A folder of several repositories.** If you start sessions from a folder
+that holds several repositories, say once where that workspace's plans live,
+in a session started there:
+
+```
+/plans-dir platform-docs/plans
+```
+
+That writes `.claude/plan-tracker.json` in the folder:
+
+```json
+{
+  "plansDir": "platform-docs/plans"
+}
+```
+
+The path is relative to the folder that holds `.claude`, or absolute, or
+starts with `~`. You can write the file by hand just as well. From then on
+every session started in that folder, in a repository under it, or in a
+worktree of one, reads and writes plans there. `/plans-dir` with no path
+says which folder is in use and what named it; `/plans-dir reset` takes the
+setting back. The folder need not exist yet: the first plan written makes it.
+
+**A different folder name everywhere.** The mod's `plansDir` option (in
+`/config`, or asked for at install) is the folder looked for where no
+workspace says otherwise. `plans` makes it `plans/` in place of `docs/plans/`
+in every project. An absolute path, or one that starts with `~`, is one
+folder for all your projects.
+
+**Which wins.** A workspace's file comes first: the nearest
+`.claude/plan-tracker.json` at or above the session's directory that names a
+plans folder. So what a folder of repositories says holds in every repository
+under it, also in one that has a `docs/plans/` of its own; such a repository
+can carry a file of its own to keep its plans to itself. With no file, the
+option where it is one fixed folder; else the nearest folder of the option's
+name at or above the session's directory.
 
 ## The plan file
 
-`skills/plan/TEMPLATE.md` is the starting point (a `docs/plans/TEMPLATE.md`
-of your own in the project is used instead where there is one). The mod reads
+`skills/plan/TEMPLATE.md` is the starting point (a `TEMPLATE.md` of your own
+in the plans folder is used instead where there is one). The mod reads
 the header and the phase headings, so keep their form:
 
 ```markdown
@@ -123,7 +167,7 @@ updated: 2026-01-15
 `status` is one of `planning`, `active`, `paused` and `done`; `phase` is the
 phase in progress, or the next one to start. Each header key has one value on
 its own line, with nothing after it. Files named `TEMPLATE.md` and `README.md`
-in `docs/plans/` are not plans.
+in the plans folder are not plans.
 
 ## Cleaning up after a phase
 

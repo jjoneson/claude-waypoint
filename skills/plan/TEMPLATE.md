@@ -10,8 +10,8 @@ updated: YYYY-MM-DD
 # Project name
 
 <!--
-Copy to docs/plans/<project>.md (or run the plan skill with the project's
-name). This file is the hand-off between sessions: each phase runs in a fresh
+Copy to the plans folder as <project>.md (or run the plan skill with the
+project's name). This file is the hand-off between sessions: each phase runs in a fresh
 session that starts here (the phase skill, or /next-phase <project>). Keep it
 short and link design docs instead of copying them.
 

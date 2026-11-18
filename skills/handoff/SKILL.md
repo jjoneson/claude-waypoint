@@ -1,12 +1,19 @@
 ---
 name: handoff
-description: Save where the current phase stands into its plan in docs/plans/, so a fresh session can continue it. Use when the user says /handoff, or before /clear in the middle of a phase.
+description: Save where the current phase stands into its plan in the project's plans folder (docs/plans/ unless set otherwise), so a fresh session can continue it. Use when the user says /handoff, or before /clear in the middle of a phase.
 argument-hint: [project-name]
 ---
 
 # Hand off a phase in progress
 
 Arguments: $ARGUMENTS
+
+**The plans folder.** Plans are `<name>.md` files in one folder. It is the
+folder the plan-tracker mod names in this conversation: in its note at the
+start, or beside this command. If nothing names it, find it yourself: the
+nearest `.claude/plan-tracker.json` at or above the working directory whose
+`plansDir` names it (a path relative to the folder that holds `.claude`);
+with no such file, the nearest `docs/plans/` folder at or above it.
 
 1. **Find the plan:** the name given, else the plan this session has been
    working on, else ask.
