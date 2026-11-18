@@ -29,6 +29,12 @@ declare module 'claude-code' {
       current: Shaped<string | null>
       /** The person put the pane away: a line above the prompt stands in for it. */
       isHidden: boolean
+      /** When a conversation's `classic.SessionStart` last reached the mod, by the session's clock; 0 for never. */
+      sessionStartAt: number
+      /** A conversation began and its `classic.SessionStart` did not reach the mod: a hook ahead of it sent it on. */
+      isStartStopped: boolean
+      /** A skill was typed and its `classic.UserPromptSubmit` did not reach the mod. */
+      isPromptStopped: boolean
     }
   }
 }

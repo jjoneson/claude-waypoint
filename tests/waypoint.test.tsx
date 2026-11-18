@@ -530,6 +530,137 @@ test('a command name that is already taken costs that command only: the pane sti
   await ui.unmount()
 })
 
+const STOPPED = "waypoint: another hook stopped waypoint's session hooks; plans folder notes and session titles are off"
+
+/**
+ * A session as a plugin install has it (the skills came with the mod), started in a folder whose plans folder is
+ * set and empty: what a person sees when a plan went somewhere else. Toasts and every command run are noted.
+ */
+const stoppedSession = async (
+  $: Parameters<Parameters<typeof test>[1]>[0],
+  on: Parameters<Parameters<typeof test>[1]>[1],
+  messages: unknown[] = [],
+) => {
+  const clock = mock.clock(on, { now: 100_000 })
+  const toasts: string[] = []
+  const ran: string[] = []
+  on('session.cwd', () => ({ value: WORK }))
+  on('session.root', () => ({ value: WORK }))
+  on('session.messages', () => ({ value: messages }))
+  on('fs.exists', (_, e) => ({ value: e.path === CONFIG || e.path.endsWith('/skills/phase/SKILL.md') }))
+  on('fs.read', (_, e) => ({ value: e.path === CONFIG ? '{ "plansDir": "platform-docs/plans" }' : PLAN }))
+  on('fs.list', () => ({ value: [] }))
+  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.status', () => ({ value: undefined }))
+  on('ui.toast', (_, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('session.end', () => ({ sessionId: 'test-session' }))
+  on('classic.SessionStart', () => ({}))
+  on('classic.UserPromptSubmit', () => ({}))
+  on('command.run', (_, e) => {
+    ran.push(`/${e.command} ${e.args}`.trim())
+    return {}
+  })
+  await $.session.start({ cwd: WORK, surface: 'terminal', isInteractive: true })
+  const wait = async (ms: number) => {
+    await clock.advance(ms)
+    for (let i = 0; i < 50; i++) await Promise.resolve()
+  }
+  const paneText = async (text: RegExp) => {
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    const found = await ui.find({ type: 'Text', text })
+    await ui.unmount()
+    return found?.text
+  }
+  return { toasts, ran, wait, paneText }
+}
+
+test("a hook ahead of the mod's that stops its session hooks is said: a toast, and the pane with the plans folder", async ($, on) => {
+  const { toasts, wait, paneText } = await stoppedSession($, on)
+
+  // Nothing yet: the conversation's SessionStart is given a few seconds to reach the mod.
+  await wait(7_000)
+  expect(toasts).toEqual([])
+  expect(await paneText(/Another hook stopped/)).toBeUndefined()
+
+  // It never came. The person is told once, and the pane, empty as it is, says where the plans folder is.
+  await wait(2_000)
+  expect(toasts).toEqual([STOPPED])
+  expect(await paneText(/Another hook stopped waypoint's session hooks/)).toBeDefined()
+  expect(await paneText(/^Plans folder:/)).toBe(`Plans folder: ${DOCS_PLANS}/`)
+  expect(await paneText(/No plans in platform-docs\/plans\/ yet/)).toBeDefined()
+  expect((await $.command.run(typed('plans-dir'))).text).toContain("Another hook is stopping waypoint's session hooks")
+
+  // A skill typed now gets no prompt hook either: still one toast, not two.
+  await $.command.run(typed('wp:plan', 'docs-site'))
+  await wait(4_000)
+  expect(toasts).toEqual([STOPPED])
+
+  // Once a SessionStart does reach the mod (the hook ahead was taken away, a new conversation), the warning goes.
+  await $.classic.SessionStart({ source: 'clear' })
+  await $.classic.UserPromptSubmit({ prompt: '/wp:plan docs-site' })
+  expect(await paneText(/Another hook stopped/)).toBeUndefined()
+  expect((await $.command.run(typed('plans-dir'))).text).not.toContain('Another hook')
+})
+
+test('with no hook in the way, nothing is said: the two events may come in either order', async ($, on) => {
+  const { toasts, ran, wait, paneText } = await stoppedSession($, on)
+  await $.classic.SessionStart({ source: 'startup' })
+  await wait(20_000)
+
+  // The person types a skill, and its prompt hook runs just before or just after the command does.
+  await $.classic.UserPromptSubmit({ prompt: '/wp:plan docs-site' })
+  await $.command.run(typed('wp:plan', 'docs-site'))
+  await wait(4_000)
+  await $.command.run(typed('wp:phase', 'docs-site'))
+  await wait(1_000)
+  await $.classic.UserPromptSubmit({ prompt: '/wp:phase docs-site' })
+  await wait(4_000)
+
+  // A /clear: the cleared conversation's SessionStart follows, and is waited for the same way.
+  await $.session.end({ reason: 'clear' })
+  await wait(1_000)
+  await $.classic.SessionStart({ source: 'clear' })
+  await wait(20_000)
+
+  expect(toasts).toEqual([])
+  expect(await paneText(/Another hook stopped/)).toBeUndefined()
+  // Every command went on to the engine as typed.
+  expect(ran).toEqual(['/wp:plan docs-site', '/wp:phase docs-site'])
+})
+
+test("a typed skill whose prompt hook never ran is noticed; Claude Code's own /plan and the mod's own runs are not skills typed", async ($, on) => {
+  const { toasts, ran, wait, paneText } = await stoppedSession($, on)
+  await $.classic.SessionStart({ source: 'startup' })
+
+  // Claude Code's /plan is not the mod's skill here: nothing is waited for, and its prompt titles nothing.
+  await $.command.run(typed('plan', 'docs-site'))
+  expect((await $.classic.UserPromptSubmit({ prompt: '/plan docs-site' })).sessionTitle).toBe(undefined)
+  // A skill the mod runs itself (a button, /next-phase) has no prompt of the person's behind it.
+  await $.command.run({ ...typed('wp:questions', 'docs-site'), origin: { kind: 'plugin', name: 'wp' } })
+  await wait(10_000)
+  expect(toasts).toEqual([])
+
+  // The person types the plan skill and no prompt hook follows.
+  await $.command.run(typed('wp:plan', 'docs-site'))
+  await wait(2_000)
+  expect(toasts).toEqual([])
+  await wait(2_000)
+  expect(toasts).toEqual([STOPPED])
+  expect(await paneText(/^Plans folder:/)).toBe(`Plans folder: ${DOCS_PLANS}/`)
+  expect(ran).toEqual(['/plan docs-site', '/wp:questions docs-site', '/wp:plan docs-site'])
+})
+
+test('a conversation already under way when the mod loads is not waited on for a SessionStart', async ($, on) => {
+  const { toasts, wait } = await stoppedSession($, on, [{ role: 'user', text: 'hello', toolUses: [] }])
+  await wait(30_000)
+  expect(toasts).toEqual([])
+})
+
 const BAND = {
   plugin: 'wp',
   component: 'AbovePrompt',

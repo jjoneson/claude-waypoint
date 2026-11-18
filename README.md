@@ -215,6 +215,22 @@ what holds across them, and where the plans are kept.
   session working in a worktree still sees the project's plans, and told to
   Claude so the skills read and write the same folder. See the next section.
 
+### If another hook is in the way
+
+The mod tells Claude the plans folder, and names sessions, through two of
+Claude Code's hook events: the start of a conversation, and each prompt. A
+hook that runs ahead of the mod's (a built-in one, or one your organization
+sets) can pass those events on without the mod's hooks ever running. The
+pane and the commands still work, so nothing looks wrong until a plan lands
+in the wrong folder.
+
+The mod notices: within a few seconds of a new conversation, or when you
+type one of its skills and no prompt event follows. It then says so once in
+a toast, "waypoint: another hook stopped waypoint's session hooks; plans
+folder notes and session titles are off", and the Plans pane and `/plans-dir`
+show the warning with the plans folder in full, so you can say it to Claude.
+With no such hook, none of this appears.
+
 ## Where plans are kept
 
 With nothing set, plans are in `docs/plans/` in the folder the session runs

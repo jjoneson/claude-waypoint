@@ -30,15 +30,30 @@ const REFRESH_MS = 5000
 /** How long a plans folder that was found is taken as still the one, before it is looked for again. */
 const LOOK_AGAIN_MS = 30_000
 /** The skills that bind a session to a plan when the person runs them. */
-const SKILL_PROMPT = new RegExp(
-  `^\\s*/(?:${PLUGIN}:)?(phase|plan|handoff|questions)(?![\\w:-])\\s*([\\w.-]+)?(?:\\s+(\\d+))?`,
-)
+const SKILL_PROMPT = /^\s*\/([\w:-]+)\s*([\w.-]+)?(?:\s+(\d+))?/
+/**
+ * How long a new conversation's `classic.SessionStart`, and a typed skill's
+ * `classic.UserPromptSubmit`, may take to reach the mod before it is taken
+ * that a hook ahead of the mod's sent the event on without them.
+ */
+const START_WAIT_MS = 8000
+const PROMPT_WAIT_MS = 3000
+/** What the person is told then, once. */
+const HOOKS_STOPPED = "waypoint: another hook stopped waypoint's session hooks; plans folder notes and session titles are off"
 
 // Change a tag when that value's fields change: it declines what an earlier
 // version stored, which outlives a reload.
 const plansAtom = atom({ plugin: 'wp', key: 'plans' } as const, [], { shape: 'plans-1' })
 const currentAtom = atom({ plugin: 'wp', key: 'current' } as const, null, { shape: 'current-1' })
 const hiddenAtom = atom({ plugin: 'wp', key: 'isHidden' } as const, false)
+// The mod's `classic.*` hooks tell Claude the plans folder and title the session. A hook that runs ahead of them
+// (a built-in's, an organization's) can send those events on without the mod's hooks, and then nothing else says so.
+/** When a conversation's `classic.SessionStart` last reached the mod, by the session's clock; 0 for never. */
+const startSeenAtom = atom({ plugin: 'wp', key: 'sessionStartAt' } as const, 0)
+/** It did not, in the time it is given. */
+const startStoppedAtom = atom({ plugin: 'wp', key: 'isStartStopped' } as const, false)
+/** A skill was typed and its `classic.UserPromptSubmit` did not reach the mod. */
+const promptStoppedAtom = atom({ plugin: 'wp', key: 'isPromptStopped' } as const, false)
 /** `$.store`: whether the pane was put away, kept from one session to the next. */
 const HIDDEN_KEY = 'isPaneHidden'
 
@@ -75,8 +90,79 @@ const badConfigs = new Set<string>()
  * `wp:questions`; copied into a skills folder they are plain `phase`,
  * `plan` and `questions`.
  */
-const skill = { phase: 'phase', plan: 'plan', questions: 'questions' }
-const SKILLS = ['phase', 'plan', 'questions'] as const
+const skill = { phase: 'phase', plan: 'plan', questions: 'questions', handoff: 'handoff' }
+const SKILLS = ['phase', 'plan', 'questions', 'handoff'] as const
+/** When a typed skill's `classic.UserPromptSubmit` last reached the mod. */
+let lastSkillPromptAt = -Infinity
+
+/**
+ * Which of the mod's skills a command name is, under the name this install
+ * gives it. Where the skills go by `wp:plan`, a plain `plan` is not one of
+ * them: it is Claude Code's own command for its plan mode.
+ */
+function skillOf(command: string): (typeof SKILLS)[number] | undefined {
+  return SKILLS.find(key => skill[key] === command)
+}
+
+/** Whether a hook ahead of the mod's has been found to stop its session hooks. */
+async function areHooksStopped($: Engine): Promise<boolean> {
+  try {
+    return (await read($, startStoppedAtom)) || (await read($, promptStoppedAtom))
+  } catch {
+    return false
+  }
+}
+
+/** Notes that one of the two events did not reach the mod, and tells the person the first time. */
+async function hooksStopped($: Engine, which: 'start' | 'prompt'): Promise<void> {
+  try {
+    const wasKnown = await areHooksStopped($)
+    if (which === 'start') await update($, startStoppedAtom, () => true)
+    else await update($, promptStoppedAtom, () => true)
+    if (!wasKnown) void $.ui.toast(HOOKS_STOPPED)
+  } catch {
+    // Saying so must never get in the way of the session.
+  }
+}
+
+/**
+ * Waits for a conversation's `classic.SessionStart` to reach the mod.
+ * `session.start`, and the `session.end` of a `/clear`, run whether or not
+ * the `classic.*` hooks do, so they are the places to wait from. The two
+ * events come in either order, so one that arrived a little before `since`
+ * counts as this conversation's.
+ */
+function awaitSessionStart($: Engine, since: number): void {
+  try {
+    $.clock.after(START_WAIT_MS, () => {
+      void (async () => {
+        try {
+          if ((await read($, startSeenAtom)) < since - START_WAIT_MS) await hooksStopped($, 'start')
+        } catch {
+          // Asked again at the next conversation.
+        }
+      })()
+    })
+  } catch {
+    // Without a clock there is still the check when a skill is typed.
+  }
+}
+
+/** Notes that one of the two events reached the mod after all, and takes its warning back. */
+async function hookReached($: Engine, which: 'start' | 'prompt'): Promise<void> {
+  try {
+    const now = await $.clock.now()
+    if (which === 'start') {
+      await update($, startSeenAtom, () => now)
+      if (await read($, startStoppedAtom)) await update($, startStoppedAtom, () => false)
+    } else {
+      lastSkillPromptAt = now
+      if (await read($, promptStoppedAtom)) await update($, promptStoppedAtom, () => false)
+    }
+  } catch {
+    // Keeping count must never get in the way of the event.
+  }
+}
 /** Whether the skills came in the mod's own folder, once that has been looked at. */
 let isBundled: boolean | undefined
 
@@ -373,6 +459,16 @@ export const register: Register = (on, options) => {
       timer = undefined
     }
     if (e.isInteractive && plans.some(isOpen) && !hidden) void $.ui.open({ id: PANE, title: 'Plans' })
+    // A conversation already under way (the mod was installed or loaded again in it, or it was resumed) has had
+    // its SessionStart: only a new one is waited for.
+    let isNew = true
+    try {
+      const said = await $.session.messages({ last: 1 })
+      isNew = !(Array.isArray(said) && said.length > 0)
+    } catch {
+      isNew = true
+    }
+    if (isNew) awaitSessionStart($, sessionStartedAt)
     return started
   })
 
@@ -398,6 +494,7 @@ export const register: Register = (on, options) => {
       sessionStartedAt = await $.clock.now()
       lastCodeEditAt = 0
       $.ui.status(undefined)
+      awaitSessionStart($, sessionStartedAt) // the cleared conversation's SessionStart
     }
     return ended
   })
@@ -458,8 +555,28 @@ export const register: Register = (on, options) => {
     const found = await findPlace($, true)
     await refresh($)
     const wrote = asked ? `${asked === 'reset' ? 'Taken out of' : 'Written to'} ${file}. ` : ''
-    return { text: wrote + whereText(found, await countPlans($, found.dir)) }
+    const warning = (await areHooksStopped($))
+      ? `\nAnother hook is stopping waypoint's session hooks, so Claude is not told this folder: say it when you run a skill.`
+      : ''
+    return { text: wrote + whereText(found, await countPlans($, found.dir)) + warning }
   })
+
+  // A skill of the mod's typed by the person: its `classic.UserPromptSubmit` should reach the mod as well. Where
+  // it does not, a hook ahead of the mod's is sending that event on without it. Every command passes through
+  // here untouched, and a run the mod started itself has no prompt to wait for.
+  on('command.run', async ($, e, next) => {
+    try {
+      if (e.origin.kind === 'composer' && skillOf(e.command)) {
+        const typedAt = await $.clock.now()
+        $.clock.after(PROMPT_WAIT_MS, () => {
+          if (lastSkillPromptAt < typedAt - PROMPT_WAIT_MS) void hooksStopped($, 'prompt')
+        })
+      }
+    } catch {
+      // Keeping watch must never get in the way of a command.
+    }
+    return next(e)
+  }).catch(($, e, next) => next(e))
 
   // `/next-phase [plan]`: with no name, the session's own plan, else the only active one.
   on('command.run', { command: FRESH }, async ($, e) => {
@@ -485,6 +602,7 @@ export const register: Register = (on, options) => {
   // <plan>" is enough. With none open it is told the folder alone, where a
   // workspace or the option has set one: the skills cannot work that out.
   on('classic.SessionStart', async ($, e, next) => {
+    await hookReached($, 'start')
     const result = await next(e)
     await findSkills($)
     const plans = await refresh($)
@@ -495,14 +613,17 @@ export const register: Register = (on, options) => {
     return { ...result, additionalContext: [...(result.additionalContext ?? []), text] }
   })
 
-  // `/phase <name>`, `/plan <name>`, `/handoff <name>` or `/questions <name>`
-  // (each also as `/wp:<skill>`) binds the session to a plan, and
-  // the first two title it after the plan and phase. The skill is told the
-  // plans folder with it.
+  // One of the mod's skills, typed (`/wp:phase <name>`, or `/phase <name>`
+  // where the skills go by plain names), binds the session to a plan, and
+  // the plan and phase skills title it after the plan and phase. The skill is
+  // told the plans folder with it. Claude Code's own `/plan` is none of this.
   on('classic.UserPromptSubmit', async ($, e, next) => {
-    const answered = await next(e)
     const m = SKILL_PROMPT.exec(e.prompt)
-    if (!m) return answered
+    if (m) await findSkills($)
+    const kind = m ? skillOf(m[1]!) : undefined
+    if (kind) await hookReached($, 'prompt')
+    const answered = await next(e)
+    if (!m || !kind) return answered
     const plans = await refresh($)
     const found = await findPlace($)
     const result = isAbsolute(found.dir)
@@ -515,10 +636,10 @@ export const register: Register = (on, options) => {
     }
     if (!name) return result
     await follow($, name)
-    if (m[1] === 'handoff' || m[1] === 'questions') return result
+    if (kind === 'handoff' || kind === 'questions') return result
     const plan = plans.find(p => p.name === name)
     const phase = m[3] ? Number(m[3]) : plan?.phase
-    const title = m[1] === 'plan' ? `${name} · planning` : `${name} · phase ${phase ?? '?'}`
+    const title = kind === 'plan' ? `${name} · planning` : `${name} · phase ${phase ?? '?'}`
     return { ...result, sessionTitle: title }
   })
 
@@ -591,10 +712,24 @@ export const register: Register = (on, options) => {
     const plans = ordered(await read($, plansAtom), current)
     const open = plans.filter(isOpen)
     const done = plans.filter(p => !isOpen(p))
+    // Where a hook ahead of the mod's stops its session hooks, Claude is not told the plans folder: the person is
+    // shown it in full, to say it themselves. An empty pane needs this most, since the plan may be elsewhere.
+    const warning =
+      (await read($, startStoppedAtom)) || (await read($, promptStoppedAtom)) ? (
+        <Box flexDirection="column" marginBottom={1}>
+          <Text color="yellow" wrap="wrap">
+            Another hook stopped waypoint's session hooks: Claude is not told the plans folder, and sessions are not
+            named after their plan.
+          </Text>
+          <Text wrap="wrap">Plans folder: {place?.dir ?? defaultDir}/</Text>
+          <Text dimColor wrap="wrap">Say that folder to Claude when you run a skill.</Text>
+        </Box>
+      ) : null
 
     if (!plans.length) {
       return (
         <Box flexDirection="column">
+          {warning}
           <Text dimColor wrap="wrap">No plans in {tailOf(place?.dir ?? defaultDir)}/ yet.</Text>
           <Text dimColor>Start one with /{skill.plan} &lt;name&gt;.</Text>
         </Box>
@@ -606,6 +741,7 @@ export const register: Register = (on, options) => {
     // the same from the prompt.
     return (
       <Box flexDirection="column">
+        {warning}
         <Box>
           <Button key="hide-plans" label="hide" onPress={() => void setHidden($, true)} />
           <Text dimColor> or /plans</Text>
