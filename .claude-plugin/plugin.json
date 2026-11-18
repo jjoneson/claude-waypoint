@@ -1,0 +1,7 @@
+{
+  "name": "plan-tracker",
+  "version": "0.2.0",
+  "description": "Multi-phase project plans in docs/plans/, one phase per session. Skills write a plan, run a phase, hand off and clean up; a pane shows the plans, names sessions after their plan and phase, starts the next phase in a cleared context (a button, or /next-phase), and reminds Claude to update a plan when it finishes a phase",
+  "author": { "name": "jjoneson" },
+  "types": "./types/index.d.ts"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "claude-plan-mod",
+  "description": "plan-tracker: multi-phase project plans for Claude Code, one phase per session",
+  "owner": { "name": "jjoneson" },
+  "plugins": [{ "name": "plan-tracker", "source": "./" }]
+}

@@ -1,0 +1,7 @@
+# Types the engine writes when it loads the mod from this folder
+.claude-plugin/types/
+# Worktrees made by Claude Code sessions working on this repo
+.claude/worktrees/
+__pycache__/
+*.log
+.DS_Store
