@@ -1,6 +1,6 @@
 {
-  "name": "claude-plan-mod",
-  "description": "plan-tracker: multi-phase project plans for Claude Code, one phase per session",
+  "name": "claude-waypoint",
+  "description": "waypoint: maps and plans that keep a coding agent's context small in a large codebase",
   "owner": { "name": "jjoneson" },
-  "plugins": [{ "name": "plan-tracker", "source": "./" }]
+  "plugins": [{ "name": "wp", "source": "./" }]
 }

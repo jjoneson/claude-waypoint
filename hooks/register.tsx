@@ -20,7 +20,7 @@ import {
   tailOf,
 } from './plans'
 
-const PLUGIN = 'plan-tracker'
+const PLUGIN = 'wp'
 const PANE = 'plans'
 /** The mod's own command: `/next-phase [plan]` clears the context and runs the phase skill. */
 const FRESH = 'next-phase'
@@ -36,9 +36,9 @@ const SKILL_PROMPT = new RegExp(
 
 // Change a tag when that value's fields change: it declines what an earlier
 // version stored, which outlives a reload.
-const plansAtom = atom({ plugin: 'plan-tracker', key: 'plans' } as const, [], { shape: 'plans-1' })
-const currentAtom = atom({ plugin: 'plan-tracker', key: 'current' } as const, null, { shape: 'current-1' })
-const hiddenAtom = atom({ plugin: 'plan-tracker', key: 'isHidden' } as const, false)
+const plansAtom = atom({ plugin: 'wp', key: 'plans' } as const, [], { shape: 'plans-1' })
+const currentAtom = atom({ plugin: 'wp', key: 'current' } as const, null, { shape: 'current-1' })
+const hiddenAtom = atom({ plugin: 'wp', key: 'isHidden' } as const, false)
 /** `$.store`: whether the pane was put away, kept from one session to the next. */
 const HIDDEN_KEY = 'isPaneHidden'
 
@@ -71,8 +71,8 @@ let home: string | undefined
 const badConfigs = new Set<string>()
 /**
  * What the person types to run the skills that come with the mod. Installed as
- * a plugin they are `plan-tracker:phase`, `plan-tracker:plan` and
- * `plan-tracker:questions`; copied into a skills folder they are plain `phase`,
+ * a plugin they are `wp:phase`, `wp:plan` and
+ * `wp:questions`; copied into a skills folder they are plain `phase`,
  * `plan` and `questions`.
  */
 const skill = { phase: 'phase', plan: 'plan', questions: 'questions' }
@@ -122,7 +122,7 @@ async function configAt($: Engine, file: string): Promise<string | null> {
   } catch {
     if (!badConfigs.has(file)) {
       badConfigs.add(file)
-      void $.ui.toast(`plan-tracker: ${file} is not read: it should hold {"plansDir": "<path>"}`)
+      void $.ui.toast(`waypoint: ${file} is not read: it should hold {"plansDir": "<path>"}`)
     }
     return null
   }
@@ -130,7 +130,7 @@ async function configAt($: Engine, file: string): Promise<string | null> {
 
 /**
  * Where the plans are. First what a workspace says: from the session's
- * directory upward, the nearest `.claude/plan-tracker.json` that names a plans
+ * directory upward, the nearest `.claude/waypoint.json` that names a plans
  * folder. A folder of several repositories that sessions start from says it
  * once, and it holds in every repository below and in their worktrees, also
  * where one of them has a `docs/plans` of its own. With no such file: the
@@ -274,7 +274,7 @@ async function startFresh($: Engine, name: string): Promise<void> {
     await $.command.run({ command: skill.phase, args: name })
   } catch (err) {
     const why = err instanceof Error ? err.message : String(err)
-    void $.ui.toast(`plan-tracker: /${skill.phase} ${name} was not started in a fresh context: ${why}`)
+    void $.ui.toast(`waypoint: /${skill.phase} ${name} was not started in a fresh context: ${why}`)
   }
 }
 
@@ -291,7 +291,7 @@ async function askQuestions($: Engine, name: string): Promise<void> {
     await $.command.run({ command: skill.questions, args: name })
   } catch (err) {
     const why = err instanceof Error ? err.message : String(err)
-    void $.ui.toast(`plan-tracker: /${skill.questions} ${name} was not started: ${why}`)
+    void $.ui.toast(`waypoint: /${skill.questions} ${name} was not started: ${why}`)
   }
 }
 
@@ -330,7 +330,13 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     sessionStartedAt = await $.clock.now()
-    await $.command.register({ name: 'plans', description: 'Show or hide the pane of project plans' })
+    // Each command is registered on its own: a name someone else's mod already holds costs that command only,
+    // and the pane, its buttons and the rest still come up.
+    try {
+      await $.command.register({ name: 'plans', description: 'Show or hide the pane of project plans' })
+    } catch {
+      // Without the command the pane still opens by itself where there are open plans.
+    }
     try {
       await $.command.register({
         name: WHERE,
@@ -490,7 +496,7 @@ export const register: Register = (on, options) => {
   })
 
   // `/phase <name>`, `/plan <name>`, `/handoff <name>` or `/questions <name>`
-  // (each also as `/plan-tracker:<skill>`) binds the session to a plan, and
+  // (each also as `/wp:<skill>`) binds the session to a plan, and
   // the first two title it after the plan and phase. The skill is told the
   // plans folder with it.
   on('classic.UserPromptSubmit', async ($, e, next) => {
@@ -554,7 +560,7 @@ export const register: Register = (on, options) => {
     return {
       ...result,
       block:
-        `plan-tracker: you said a phase is done, but ${place?.dir ?? defaultDir}/${current}.md hasn't changed since the work. ` +
+        `waypoint: you said a phase is done, but ${place?.dir ?? defaultDir}/${current}.md hasn't changed since the work. ` +
         "Update it as the phase skill's step 7 says (the phase heading, Notes, Decisions, Next, Open questions and the header), then finish. " +
         "If the phase isn't finished, just say so and stop.",
     }

@@ -37,7 +37,7 @@ updated: 2026-01-15
 `
 
 const PANE = {
-  plugin: 'plan-tracker',
+  plugin: 'wp',
   component: 'Pane',
   requestId: 'plans',
   props: {
@@ -238,7 +238,7 @@ test('a plan with open questions has a button that runs the questions skill for 
   expect(typedIt.sessionTitle).toBe(undefined)
 })
 
-test('installed as a plugin, the skills go by plan-tracker:<skill>, and the mod runs and reads them under that name', async ($, on) => {
+test('installed as a plugin, the skills go by wp:<skill>, and the mod runs and reads them under that name', async ($, on) => {
   const clock = mock.clock(on, { now: 10_000 })
   const ran: string[] = []
   on('fs.list', () => ({
@@ -251,9 +251,9 @@ test('installed as a plugin, the skills go by plan-tracker:<skill>, and the mod 
     value: [
       { name: 'clear', description: '', source: 'builtin' },
       { name: 'phase', description: '', source: 'user' },
-      { name: 'plan-tracker:phase', description: '', source: 'plugin', plugin: 'plan-tracker' },
-      { name: 'plan-tracker:plan', description: '', source: 'plugin', plugin: 'plan-tracker' },
-      { name: 'plan-tracker:questions', description: '', source: 'plugin', plugin: 'plan-tracker' },
+      { name: 'wp:phase', description: '', source: 'plugin', plugin: 'wp' },
+      { name: 'wp:plan', description: '', source: 'plugin', plugin: 'wp' },
+      { name: 'wp:questions', description: '', source: 'plugin', plugin: 'wp' },
     ],
   }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
@@ -274,28 +274,28 @@ test('installed as a plugin, the skills go by plan-tracker:<skill>, and the mod 
 
   // A new conversation is told the name that works in this install.
   const told = await $.classic.SessionStart({ source: 'startup' })
-  expect((told.additionalContext ?? []).join('\n')).toContain('Run a phase with /plan-tracker:phase <name>.')
+  expect((told.additionalContext ?? []).join('\n')).toContain('Run a phase with /wp:phase <name>.')
 
   // Typed under the plugin's name, the skill binds the session to its plan like the plain one.
-  const titled = await $.classic.UserPromptSubmit({ prompt: '/plan-tracker:phase docs-site 3' })
+  const titled = await $.classic.UserPromptSubmit({ prompt: '/wp:phase docs-site 3' })
   expect(titled.sessionTitle).toBe('docs-site · phase 3')
-  expect((await $.classic.UserPromptSubmit({ prompt: '/plan-tracker:plan docs-site' })).sessionTitle).toBe(
+  expect((await $.classic.UserPromptSubmit({ prompt: '/wp:plan docs-site' })).sessionTitle).toBe(
     'docs-site · planning',
   )
 
   const said = await $.command.run(typed('next-phase'))
-  expect(said.text).toBe('Clearing the context, then /plan-tracker:phase docs-site.')
+  expect(said.text).toBe('Clearing the context, then /wp:phase docs-site.')
   await clock.advance(1)
   await settled(2)
-  expect(ran).toEqual(['/clear', '/plan-tracker:phase docs-site'])
+  expect(ran).toEqual(['/clear', '/wp:phase docs-site'])
 
   // The questions skill too: in what a new conversation is told, and behind the pane's button.
-  expect((told.additionalContext ?? []).join('\n')).toContain('with /plan-tracker:questions <name>.')
+  expect((told.additionalContext ?? []).join('\n')).toContain('with /wp:questions <name>.')
   ran.length = 0
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'ask-docs-site' })
   await settled(1)
-  expect(ran).toEqual(['/plan-tracker:questions docs-site'])
+  expect(ran).toEqual(['/wp:questions docs-site'])
   await ui.unmount()
 })
 
@@ -320,7 +320,7 @@ test("while the commands cannot be listed, the mod's own folder says the skills 
   expect(asked.some(path => path.endsWith('/skills/phase/SKILL.md'))).toBe(true)
 
   const told = await $.classic.SessionStart({ source: 'startup' })
-  expect((told.additionalContext ?? []).join('\n')).toContain('Run a phase with /plan-tracker:phase <name>.')
+  expect((told.additionalContext ?? []).join('\n')).toContain('Run a phase with /wp:phase <name>.')
 })
 
 test('a plans folder is worked out from a base, a home and what a config file says', async () => {
@@ -351,7 +351,7 @@ test('a plans folder is worked out from a base, a home and what a config file sa
 
 /** A folder of several repositories that sessions start from: its config file names the plans folder. */
 const WORK = '/work'
-const CONFIG = `${WORK}/.claude/plan-tracker.json`
+const CONFIG = `${WORK}/.claude/waypoint.json`
 const DOCS_PLANS = `${WORK}/platform-docs/plans`
 
 test('a folder of several repositories names its plans folder, and a session there or in a worktree below reads it', async ($, on) => {
@@ -429,7 +429,7 @@ test('the plansDir option names the folder to look for', { options: { plansDir: 
   // With no plan open, a new conversation is still told a folder that is not the usual one.
   const told = await $.classic.SessionStart({ source: 'startup' })
   expect((told.additionalContext ?? []).join('\n')).toBe(
-    `plan-tracker: this project's plans folder is ${WORK}/plans/. Plans are read from there and new ones are written there.`,
+    `waypoint: this project's plans folder is ${WORK}/plans/. Plans are read from there and new ones are written there.`,
   )
 })
 
@@ -504,8 +504,34 @@ test('/plans-dir says where the plans folder is, sets it for the workspace and t
   await after.unmount()
 })
 
+test('a command name that is already taken costs that command only: the pane still comes up', async ($, on) => {
+  mock.clock(on, { now: 10_000 })
+  const opened: string[] = []
+  on('fs.list', () => ({
+    value: [{ name: 'docs-site.md', kind: 'file', size: PLAN.length, mtimeMs: 5_000, isLink: false }],
+  }))
+  on('fs.read', () => ({ value: PLAN }))
+  on('command.register', (_, e) => {
+    if (e.name === 'plans') throw new Error('"/plans" refused: another plugin registered it already')
+    return { value: { command: e.name } }
+  })
+  on('ui.open', (_, e) => {
+    opened.push(e.id)
+    return { value: { isPlaced: true } }
+  })
+  on('ui.status', () => ({ value: undefined }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  for (let i = 0; i < 50; i++) await Promise.resolve()
+  expect(opened).toEqual(['plans'])
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /docs-site/ })).toBeDefined()
+  await ui.unmount()
+})
+
 const BAND = {
-  plugin: 'plan-tracker',
+  plugin: 'wp',
   component: 'AbovePrompt',
   props: {
     hasSurvey: false,

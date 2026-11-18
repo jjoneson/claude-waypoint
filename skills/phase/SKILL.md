@@ -9,9 +9,9 @@ argument-hint: <project-name> [phase number]
 Arguments: $ARGUMENTS
 
 **The plans folder.** Plans are `<name>.md` files in one folder. It is the
-folder the plan-tracker mod names in this conversation: in its note at the
+folder the waypoint mod names in this conversation: in its note at the
 start, or beside this command. If nothing names it, find it yourself: the
-nearest `.claude/plan-tracker.json` at or above the working directory whose
+nearest `.claude/waypoint.json` at or above the working directory whose
 `plansDir` names it (a path relative to the folder that holds `.claude`);
 with no such file, the nearest `docs/plans/` folder at or above it.
 
@@ -63,7 +63,7 @@ with no such file, the nearest `docs/plans/` folder at or above it.
    not done is left as it is.
 9. **Report and stop.** Say what was done, how it was proved, what's waiting
    on the user, and the next step: `/next-phase <name>`, or the Plans pane's
-   "Clear context, start phase N" button (the plan-tracker mod clears the
+   "Clear context, start phase N" button (the waypoint mod clears the
    conversation and runs this skill; a skill cannot clear it itself).
    `/clear` and then this skill with the plan's name does the same by hand.
    Don't start the next phase.

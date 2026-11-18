@@ -9,7 +9,7 @@ export const PLAN_DIR = 'docs/plans'
  * several repositories that sessions start from, where the plans live in one
  * of the repositories or beside them.
  */
-export const CONFIG_FILE = '.claude/plan-tracker.json'
+export const CONFIG_FILE = '.claude/waypoint.json'
 
 /** Whether a path names one place wherever it is read from: `/x`, `~/x`, `C:\x`. */
 export function isAbsolute(path: string): boolean {
@@ -153,7 +153,7 @@ export function contextText(
     return `- ${p.name} (${p.title}): ${p.status}, ${where}${asks}. Next: ${p.next || 'see the plan'}`
   })
   return [
-    `Open project plans in ${dir}/ (from the plan-tracker mod; that is this project's plans folder):`,
+    `Open project plans in ${dir}/ (from the waypoint mod; that is this project's plans folder):`,
     ...lines,
     `Run a phase with /${skills.phase} <name>. The plan file is the hand-off between sessions.`,
     ...(open.some(p => p.questions > 0)
@@ -164,7 +164,7 @@ export function contextText(
 
 /** What Claude is told where the plans folder is not the usual one and there is nothing else to say about it. */
 export function folderText(dir: string): string {
-  return `plan-tracker: this project's plans folder is ${dir}/. Plans are read from there and new ones are written there.`
+  return `waypoint: this project's plans folder is ${dir}/. Plans are read from there and new ones are written there.`
 }
 
 /** Whether a message says a phase is finished. */

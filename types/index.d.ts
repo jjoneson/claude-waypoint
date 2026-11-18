@@ -24,7 +24,7 @@ export type Plan = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'plan-tracker': {
+    'wp': {
       plans: Shaped<Plan[]>
       current: Shaped<string | null>
       /** The person put the pane away: a line above the prompt stands in for it. */

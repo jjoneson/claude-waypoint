@@ -1,4 +1,4 @@
-# plan-tracker
+# waypoint
 
 A mod for Claude Code that keeps an agent's context small in a large
 codebase, in two ways that work together:
@@ -33,7 +33,7 @@ The repository holds:
 At the prompt of a Claude Code session in a terminal:
 
 ```
-/plugin install plan-tracker --marketplace jjoneson/claude-plan-mod
+/plugin install wp --marketplace jjoneson/claude-waypoint
 ```
 
 Answer `y` to add the marketplace, then pick a scope (the user scope makes it
@@ -42,11 +42,11 @@ available in every project).
 From a shell:
 
 ```
-claude plugin install plan-tracker --marketplace jjoneson/claude-plan-mod
+claude plugin install wp --marketplace jjoneson/claude-waypoint
 ```
 
 In the desktop app, where `/plugin` does not run: click + next to the prompt
-box, then Plugins, Add marketplace with `jjoneson/claude-plan-mod`, then Add
+box, then Plugins, Add marketplace with `jjoneson/claude-waypoint`, then Add
 plugin.
 
 It needs a Claude Code build that loads mods (hooks modules written in
@@ -56,21 +56,26 @@ without installing, clone the repository and run
 
 ## Use
 
+The project is called waypoint; the plugin's install name is `wp`, so that
+the prefix on its skills is short. The three commands the mod registers
+itself have no prefix. Claude Code's own `/plan`, which turns on its plan
+mode, is left as it is: this mod's planning is `/wp:plan`.
+
 | Type | What it does |
 | --- | --- |
-| `/plan-tracker:map [what to map \| refresh]` | Writes or refreshes the project's maps with you: the index in `CLAUDE.md`, the module map in `docs/architecture.md`, and the import check. |
-| `/plan-tracker:plan <name> [what it is about]` | Agrees a plan with you and writes `docs/plans/<name>.md`. Run it again to revise the plan. It does not start the work. |
+| `/wp:map [what to map \| refresh]` | Writes or refreshes the project's maps with you: the index in `CLAUDE.md`, the module map in `docs/architecture.md`, and the import check. |
+| `/wp:plan <name> [what it is about]` | Agrees a plan with you and writes `docs/plans/<name>.md`. Run it again to revise the plan. It does not start the work. |
 | `/next-phase [name]` | Clears the conversation, then runs the plan's next phase. With no name: the session's own plan, else the only active one. |
-| `/plan-tracker:phase <name> [number]` | Runs a phase in the conversation as it is. `/next-phase` is this after a `/clear`. |
-| `/plan-tracker:questions [name]` | Asks you the plan's open questions one after another, each with its choices and a "Skip for now", and writes your answers into the plan. |
-| `/plan-tracker:handoff [name]` | Mid-phase: writes where things stand into the plan, so a fresh session can pick it up. |
-| `/plan-tracker:cleanup [worktree names]` | After a phase done in a worktree: merges its branch into the base branch, stops the servers it left running, removes the worktree. |
+| `/wp:phase <name> [number]` | Runs a phase in the conversation as it is. `/next-phase` is this after a `/clear`. |
+| `/wp:questions [name]` | Asks you the plan's open questions one after another, each with its choices and a "Skip for now", and writes your answers into the plan. |
+| `/wp:handoff [name]` | Mid-phase: writes where things stand into the plan, so a fresh session can pick it up. |
+| `/wp:cleanup [worktree names]` | After a phase done in a worktree: merges its branch into the base branch, stops the servers it left running, removes the worktree. |
 | `/plans` | Shows or hides the Plans pane. |
 | `/plans-dir [path \| reset]` | Says where the plans folder is and what named it. With a path, sets it for the workspace. |
 
 A usual round:
 
-1. `/plan-tracker:plan checkout-flow a new checkout in three steps`. Claude
+1. `/wp:plan checkout-flow a new checkout in three steps`. Claude
    asks what it needs to, sizes each phase to one session, and writes the
    plan. You approve it.
 2. `/next-phase checkout-flow`. Claude reads the plan, marks phase 1 in
@@ -80,7 +85,7 @@ A usual round:
 3. `/next-phase` again for phase 2, in a cleared conversation, and so on. The
    Plans pane has a button that does the same.
 
-Plans gather open questions as the work goes on. `/plan-tracker:questions
+Plans gather open questions as the work goes on. `/wp:questions
 checkout-flow` (or the pane's "answer them" button) puts them to you in the
 same kind of dialog Claude uses for its own questions, up to four at a time.
 Each has the plan's choices with the recommended one first, a free-text
@@ -90,7 +95,7 @@ the plan is changed.
 
 ## The maps
 
-Run `/plan-tracker:map` once in a repository. Claude measures it (how big,
+Run `/wp:map` once in a repository. Claude measures it (how big,
 where the bulk is, which files are huge, what the checks cost) and writes
 three things with you:
 
@@ -185,7 +190,7 @@ with `path:line` references and a short explanation, not file contents.
 `checker` runs the checks it is given and answers pass or fail with the
 failing lines; it never fixes or re-records anything. Both run on a smaller
 model, and the plan and phase skills send work to them. Installed with the
-plugin they are `plan-tracker:scout` and `plan-tracker:checker`.
+plugin they are `wp:scout` and `wp:checker`.
 
 **Several repositories.** Map each repository from inside it. The folder that
 holds them gets a short `CLAUDE.md` of its own: a table of the repositories,
@@ -223,7 +228,7 @@ in a session started there:
 /plans-dir platform-docs/plans
 ```
 
-That writes `.claude/plan-tracker.json` in the folder:
+That writes `.claude/waypoint.json` in the folder:
 
 ```json
 {
@@ -245,7 +250,7 @@ in every project. An absolute path, or one that starts with `~`, is one
 folder for all your projects.
 
 **Which wins.** A workspace's file comes first: the nearest
-`.claude/plan-tracker.json` at or above the session's directory that names a
+`.claude/waypoint.json` at or above the session's directory that names a
 plans folder. So what a folder of repositories says holds in every repository
 under it, also in one that has a `docs/plans/` of its own; such a repository
 can carry a file of its own to keep its plans to itself. With no file, the
@@ -288,7 +293,7 @@ in the plans folder are not plans.
 
 ## Cleaning up after a phase
 
-`/plan-tracker:cleanup` is for phases done in a git worktree under
+`/wp:cleanup` is for phases done in a git worktree under
 `<repo>/.claude/worktrees/<name>` on a branch `worktree-<name>`, which is
 where Claude Code's own worktrees go. It checks the phase is finished, pushes
 the phase's branch and the base branch (where the repo has a remote), merges

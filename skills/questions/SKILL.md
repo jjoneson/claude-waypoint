@@ -9,9 +9,9 @@ argument-hint: [project-name]
 Arguments: $ARGUMENTS
 
 **The plans folder.** Plans are `<name>.md` files in one folder. It is the
-folder the plan-tracker mod names in this conversation: in its note at the
+folder the waypoint mod names in this conversation: in its note at the
 start, or beside this command. If nothing names it, find it yourself: the
-nearest `.claude/plan-tracker.json` at or above the working directory whose
+nearest `.claude/waypoint.json` at or above the working directory whose
 `plansDir` names it (a path relative to the folder that holds `.claude`);
 with no such file, the nearest `docs/plans/` folder at or above it.
 
