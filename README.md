@@ -8,8 +8,8 @@ what comes next.
 
 The repository holds two things that work together:
 
-- **Four skills** that write and run the plans: `plan`, `phase`, `handoff`
-  and `cleanup`.
+- **Five skills** that write and run the plans: `plan`, `phase`, `questions`,
+  `handoff` and `cleanup`.
 - **A mod** that shows the plans in a pane beside the chat, starts the next
   phase in a cleared conversation, and keeps Claude honest about updating the
   plan.
@@ -47,6 +47,7 @@ without installing, clone the repository and run
 | `/plan-tracker:plan <name> [what it is about]` | Agrees a plan with you and writes `docs/plans/<name>.md`. Run it again to revise the plan. It does not start the work. |
 | `/next-phase [name]` | Clears the conversation, then runs the plan's next phase. With no name: the session's own plan, else the only active one. |
 | `/plan-tracker:phase <name> [number]` | Runs a phase in the conversation as it is. `/next-phase` is this after a `/clear`. |
+| `/plan-tracker:questions [name]` | Asks you the plan's open questions one after another, each with its choices and a "Skip for now", and writes your answers into the plan. |
 | `/plan-tracker:handoff [name]` | Mid-phase: writes where things stand into the plan, so a fresh session can pick it up. |
 | `/plan-tracker:cleanup [worktree names]` | After a phase done in a worktree: merges its branch into the base branch, stops the servers it left running, removes the worktree. |
 | `/plans` | Shows or hides the Plans pane. |
@@ -63,13 +64,23 @@ A usual round:
 3. `/next-phase` again for phase 2, in a cleared conversation, and so on. The
    Plans pane has a button that does the same.
 
+Plans gather open questions as the work goes on. `/plan-tracker:questions
+checkout-flow` (or the pane's "answer them" button) puts them to you in the
+same kind of dialog Claude uses for its own questions, up to four at a time.
+Each has the plan's choices with the recommended one first, a free-text
+choice, and "Skip for now". An answer becomes a dated decision in the plan
+and the question leaves the list; a skipped one stays as it is. Nothing but
+the plan is changed.
+
 ## What the mod does
 
 - **Plans pane.** Lists the open plans: status, phase, a bar of phases done,
   the plan's `next` line, and how many open questions wait for you. The plan
   the session works on, and every active plan, has its phases listed and a
-  "Clear context, start phase N" button. `hide` puts the pane away to one
-  line above the prompt; the choice is kept across sessions.
+  "Clear context, start phase N" button. A plan with open questions has an
+  "answer them" button, which runs the questions skill for it in the
+  conversation as it is. `hide` puts the pane away to one line above the
+  prompt; the choice is kept across sessions.
 - **Start of a conversation.** Claude is told which plans are open and where
   each stands, so "continue checkout-flow" is enough.
 - **Session title and status line.** Running the plan or phase skill names
@@ -144,4 +155,4 @@ claude --plugin-dir .        # a session with this folder's copy loaded
 - `hooks/register.tsx`: the hooks, the pane and the two commands.
 - `hooks/plans.ts`: reading a plan file; no engine calls, so it is easy to test.
 - `types/index.d.ts`: what the mod keeps in the session's state.
-- `skills/`: the four skills, plain Markdown.
+- `skills/`: the five skills, plain Markdown.

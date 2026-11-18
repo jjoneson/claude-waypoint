@@ -54,6 +54,8 @@ test('a plan is read from its header, phase headings and open questions', async 
   expect(plan.list.map(p => p.state)).toEqual(['done', 'in progress', 'not started'])
   expect(plan.questions).toBe(1)
   expect(contextText([plan])).toContain('- docs-site (Docs site): active, phase 2 of 3; 1 open question.')
+  expect(contextText([plan])).toContain('with /questions <name>.')
+  expect(contextText([{ ...plan, questions: 0 }])).not.toContain('/questions')
   expect(contextText([{ ...plan, status: 'done' }])).toBe(null)
   expect(saysPhaseDone('Phase 2 is done. Next: /clear, then /phase docs-site')).toBe(true)
   expect(saysPhaseDone('I finished phase 2.')).toBe(true)
@@ -182,6 +184,51 @@ test("the pane's button and /next-phase clear the context and then run /phase", 
   expect(ran).toEqual([])
 })
 
+test('a plan with open questions has a button that runs the questions skill for it, and the conversation is kept', async ($, on) => {
+  mock.clock(on, { now: 10_000 })
+  const ran: string[] = []
+  const SETTLED = PLAN.replace('- Should search cover the blog? (recommend yes)\n', '')
+  on('fs.list', () => ({
+    value: [
+      { name: 'docs-site.md', kind: 'file', size: PLAN.length, mtimeMs: 5_000, isLink: false },
+      { name: 'settled.md', kind: 'file', size: SETTLED.length, mtimeMs: 4_000, isLink: false },
+    ],
+  }))
+  on('fs.read', (_, e) => ({ value: e.path.endsWith('settled.md') ? SETTLED : PLAN }))
+  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.status', () => ({ value: undefined }))
+  on('ui.toast', () => ({ value: undefined }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('classic.UserPromptSubmit', () => ({}))
+  on('command.run', (_, e) => {
+    ran.push(`/${e.command} ${e.args}`.trim())
+    return {}
+  })
+  const settled = async (count: number) => {
+    for (let i = 0; i < 50 && ran.length < count; i++) await Promise.resolve()
+  }
+
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    ran.length = 0
+    const ui = await $.ui.mount({ ...PANE, surface })
+    expect(await ui.find({ type: 'Text', text: /or \/questions docs-site/ })).toBeDefined()
+    // The plan with nothing to ask has no such button.
+    expect(await ui.find({ type: 'Text', text: /settled/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /or \/questions settled/ })).toBeUndefined()
+    await ui.press({ key: 'ask-docs-site' })
+    await settled(1)
+    expect(ran).toEqual(['/questions docs-site'])
+    await ui.unmount()
+  }
+
+  // Typed, the skill binds the session to its plan and leaves the session's title alone.
+  const typedIt = await $.classic.UserPromptSubmit({ prompt: '/questions docs-site' })
+  expect(typedIt.sessionTitle).toBe(undefined)
+})
+
 test('installed as a plugin, the skills go by plan-tracker:<skill>, and the mod runs and reads them under that name', async ($, on) => {
   const clock = mock.clock(on, { now: 10_000 })
   const ran: string[] = []
@@ -197,6 +244,7 @@ test('installed as a plugin, the skills go by plan-tracker:<skill>, and the mod 
       { name: 'phase', description: '', source: 'user' },
       { name: 'plan-tracker:phase', description: '', source: 'plugin', plugin: 'plan-tracker' },
       { name: 'plan-tracker:plan', description: '', source: 'plugin', plugin: 'plan-tracker' },
+      { name: 'plan-tracker:questions', description: '', source: 'plugin', plugin: 'plan-tracker' },
     ],
   }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
@@ -231,6 +279,15 @@ test('installed as a plugin, the skills go by plan-tracker:<skill>, and the mod 
   await clock.advance(1)
   await settled(2)
   expect(ran).toEqual(['/clear', '/plan-tracker:phase docs-site'])
+
+  // The questions skill too: in what a new conversation is told, and behind the pane's button.
+  expect((told.additionalContext ?? []).join('\n')).toContain('with /plan-tracker:questions <name>.')
+  ran.length = 0
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'ask-docs-site' })
+  await settled(1)
+  expect(ran).toEqual(['/plan-tracker:questions docs-site'])
+  await ui.unmount()
 })
 
 test("while the commands cannot be listed, the mod's own folder says the skills came with it", async ($, on) => {

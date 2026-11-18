@@ -20,7 +20,9 @@ const PANE = 'plans'
 const FRESH = 'next-phase'
 const REFRESH_MS = 5000
 /** The skills that bind a session to a plan when the person runs them. */
-const SKILL_PROMPT = new RegExp(`^\\s*/(?:${PLUGIN}:)?(phase|plan|handoff)(?![\\w:-])\\s*([\\w.-]+)?(?:\\s+(\\d+))?`)
+const SKILL_PROMPT = new RegExp(
+  `^\\s*/(?:${PLUGIN}:)?(phase|plan|handoff|questions)(?![\\w:-])\\s*([\\w.-]+)?(?:\\s+(\\d+))?`,
+)
 
 // Change a tag when that value's fields change: it declines what an earlier
 // version stored, which outlives a reload.
@@ -44,10 +46,12 @@ let planDir: string | undefined
 let lookedFrom = ''
 /**
  * What the person types to run the skills that come with the mod. Installed as
- * a plugin they are `plan-tracker:phase` and `plan-tracker:plan`; copied into a
- * skills folder they are plain `phase` and `plan`.
+ * a plugin they are `plan-tracker:phase`, `plan-tracker:plan` and
+ * `plan-tracker:questions`; copied into a skills folder they are plain `phase`,
+ * `plan` and `questions`.
  */
-const skill = { phase: 'phase', plan: 'plan' }
+const skill = { phase: 'phase', plan: 'plan', questions: 'questions' }
+const SKILLS = ['phase', 'plan', 'questions'] as const
 /** Whether the skills came in the mod's own folder, once that has been looked at. */
 let isBundled: boolean | undefined
 
@@ -71,7 +75,7 @@ async function findSkills($: Engine): Promise<void> {
   } catch {
     // Not to be had yet: the folder's answer stands.
   }
-  for (const key of ['phase', 'plan'] as const) {
+  for (const key of SKILLS) {
     const own = `${PLUGIN}:${key}`
     skill[key] = [own, key].find(name => names.includes(name)) ?? (isBundled ? own : key)
   }
@@ -194,6 +198,23 @@ async function startFresh($: Engine, name: string): Promise<void> {
   }
 }
 
+/**
+ * Runs the questions skill for a plan, as if the person had typed it: Claude
+ * asks the plan's open questions one after another and writes the answers
+ * into the plan. The conversation is kept. The command is queued and runs
+ * once the session is idle.
+ */
+async function askQuestions($: Engine, name: string): Promise<void> {
+  await findSkills($)
+  try {
+    await follow($, name)
+    await $.command.run({ command: skill.questions, args: name })
+  } catch (err) {
+    const why = err instanceof Error ? err.message : String(err)
+    void $.ui.toast(`plan-tracker: /${skill.questions} ${name} was not started: ${why}`)
+  }
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
@@ -304,14 +325,14 @@ export const register: Register = on => {
   on('classic.SessionStart', async ($, e, next) => {
     const result = await next(e)
     await findSkills($)
-    const text = contextText(await refresh($), skill.phase)
+    const text = contextText(await refresh($), skill)
     if (!text) return result
     return { ...result, additionalContext: [...(result.additionalContext ?? []), text] }
   })
 
-  // `/phase <name>`, `/plan <name>` or `/handoff <name>` (each also as
-  // `/plan-tracker:<skill>`) binds the session to a plan and titles it after
-  // the plan and phase.
+  // `/phase <name>`, `/plan <name>`, `/handoff <name>` or `/questions <name>`
+  // (each also as `/plan-tracker:<skill>`) binds the session to a plan, and
+  // the first two title it after the plan and phase.
   on('classic.UserPromptSubmit', async ($, e, next) => {
     const result = await next(e)
     const m = SKILL_PROMPT.exec(e.prompt)
@@ -324,7 +345,7 @@ export const register: Register = on => {
     }
     if (!name) return result
     await follow($, name)
-    if (m[1] === 'handoff') return result
+    if (m[1] === 'handoff' || m[1] === 'questions') return result
     const plan = plans.find(p => p.name === name)
     const phase = m[3] ? Number(m[3]) : plan?.phase
     const title = m[1] === 'plan' ? `${name} · planning` : `${name} · phase ${phase ?? '?'}`
@@ -454,6 +475,15 @@ export const register: Register = on => {
                 <Text color="yellow">
                   {plan.questions} open question{plan.questions === 1 ? '' : 's'} for you
                 </Text>
+              ) : null}
+              {plan.questions > 0 ? (
+                <Box>
+                  <Button key={`ask-${plan.name}`} label="answer them" onPress={() => void askQuestions($, plan.name)} />
+                  <Text dimColor wrap="truncate-end">
+                    {' '}
+                    or /{skill.questions} {plan.name}
+                  </Text>
+                </Box>
               ) : null}
               {isListed && plan.phase !== null ? (
                 <Button key={`fresh-${plan.name}`} onPress={() => void startFresh($, plan.name)}>

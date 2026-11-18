@@ -29,6 +29,8 @@ Arguments: $ARGUMENTS
    today's date. Record each decision with who made it. Remove the template's
    comment.
 5. **Stop there.** Don't start phase 1. End with the plan's path, one line per
-   phase, any open questions, and how to start: `/next-phase <name>`, which
-   clears the conversation and runs the phase skill (by hand: `/clear`, then
-   this plugin's `phase` skill with the plan's name).
+   phase, how many questions are still open (this plugin's `questions` skill
+   goes through them with the user one by one), and how to start:
+   `/next-phase <name>`, which clears the conversation and runs the phase
+   skill (by hand: `/clear`, then this plugin's `phase` skill with the plan's
+   name).

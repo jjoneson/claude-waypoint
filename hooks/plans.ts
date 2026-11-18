@@ -77,8 +77,14 @@ export function statusText(plan: Plan): string {
   return parts.join(' · ')
 }
 
-/** What a new session is told about the plans that are still open. `phaseCommand` is what runs the phase skill. */
-export function contextText(plans: readonly Plan[], phaseCommand = 'phase'): string | null {
+/** What the person types to run the phase skill and the questions skill, without the slash. */
+export type SkillNames = { phase: string; questions: string }
+
+/** What a new session is told about the plans that are still open, with the skills' names as this install has them. */
+export function contextText(
+  plans: readonly Plan[],
+  skills: SkillNames = { phase: 'phase', questions: 'questions' },
+): string | null {
   const open = plans.filter(isOpen)
   if (!open.length) return null
   const lines = open.map(p => {
@@ -89,7 +95,10 @@ export function contextText(plans: readonly Plan[], phaseCommand = 'phase'): str
   return [
     'Open project plans in docs/plans/ (from the plan-tracker mod):',
     ...lines,
-    `Run a phase with /${phaseCommand} <name>. The plan file is the hand-off between sessions.`,
+    `Run a phase with /${skills.phase} <name>. The plan file is the hand-off between sessions.`,
+    ...(open.some(p => p.questions > 0)
+      ? [`Go through a plan's open questions with the user, and record the answers, with /${skills.questions} <name>.`]
+      : []),
   ].join('\n')
 }
 
