@@ -54,7 +54,10 @@ the first of these that gives one:
    goes under Open questions, or becomes a later phase, rather than being done
    now.
 6. **If the user's eyes are the proof** (a screenshot, a try-out), stop and
-   ask for their verdict, then record it under Decisions as theirs.
+   ask for their verdict, then record it under Decisions as theirs. Before
+   you ask, log the time so far with the command in step 7's last point: the
+   plan then shows what is left while it waits. The wait itself is not
+   counted, and logging again later adds only what is new.
 7. **Finish by updating the plan:**
    - the heading becomes `done`, with the commit if there is one:
      `### N. Name: done (commit abc1234)`;
@@ -63,7 +66,17 @@ the first of these that gives one:
    - Decisions (with who made each), Next (the files to open and the check to
      run first) and Open questions;
    - the header: `phase` moves to the next phase, `status` stays `active` (or
-     becomes `done` after the last phase), and `next` and `updated` are set.
+     becomes `done` after the last phase), and `next` and `updated` are set;
+   - the time, last, once the rest is written: run
+     `python3 "${CLAUDE_SKILL_DIR}/../plan/estimate.py" <the plan's file> --log N --session ${CLAUDE_SESSION_ID}`.
+     It measures what this session has spent working, adds it to the phase's
+     **Took**, and writes what the plan still needs into the header
+     (`estimate`, `spent`, `remaining`). Don't write those yourself. Where it
+     says it found no record of the session, or the figure is plainly off (a
+     prompt sat unanswered, the machine slept), give the phase's time with
+     `--took N=<time>` from the checks' timings and your own account. If a
+     later phase now looks bigger or smaller than its **Estimate**, change
+     that estimate and run the script once more.
 
    Commit only if the user asked for commits.
 8. **Clear up, where the user has asked for it.** If the user, the project's
@@ -74,8 +87,9 @@ the first of these that gives one:
    worktree. Without that standing word, do none of it: say in the report
    that `/cleanup` (this plugin's `cleanup` skill) does it. A phase that is
    not done is left as it is.
-9. **Report and stop.** Say what was done, how it was proved, what's waiting
-   on the user, and the next step: `/next-phase <name>`, or the Plans pane's
+9. **Report and stop.** Say what was done, how it was proved, how long the
+   phase took and what the plan is now taken to need (the script's figures,
+   as it printed them), what's waiting on the user, and the next step: `/next-phase <name>`, or the Plans pane's
    "Clear context, start phase N" button (the waypoint mod clears the
    conversation and runs this skill; a skill cannot clear it itself).
    `/clear` and then this skill with the plan's name does the same by hand.

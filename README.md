@@ -331,6 +331,9 @@ status: active
 phase: 2
 phases: 3
 next: One line saying what the next session does first.
+estimate: 6h
+spent: 3h 40m
+remaining: 4h 15m
 updated: 2026-01-15
 ---
 
@@ -339,8 +342,18 @@ updated: 2026-01-15
 ## Phases
 
 ### 1. Cart page: done (commit abc1234)
+
+- **Estimate:** 2h
+- **Took:** 3h
+
 ### 2. Payment form: in progress
+
+- **Estimate:** 3h
+- **Took:** 40m
+
 ### 3. Receipts: not started
+
+- **Estimate:** 1h
 
 ## Open questions
 
@@ -351,6 +364,53 @@ updated: 2026-01-15
 phase in progress, or the next one to start. Each header key has one value on
 its own line, with nothing after it. Files named `TEMPLATE.md` and `README.md`
 in the plans folder are not plans.
+
+## Time left
+
+Every plan carries an estimate of the working time it still needs, which
+starts as a rough guess and corrects itself as phases finish.
+
+- **The guess.** When a plan is written, each phase gets an **Estimate**:
+  what a session will spend on it, Claude's work and the checks and jobs it
+  waits on. Not the time it waits for you. It is meant to be rough.
+- **What it took.** When a phase ends, is handed off, or stops for your
+  verdict, the session's working time is measured and added to the phase's
+  **Took**. The measure comes from Claude Code's own record of the session:
+  the time between its entries, leaving out every stretch that ended with
+  you typing. A session that waited an hour for an answer is not an hour of
+  work.
+- **What is left.** Phases not started are taken to need their estimates
+  times a factor: the time finished phases took over what was guessed for
+  them. The first guess is trusted for one average phase's worth, so one slow
+  phase moves the figure part of the way, and it settles as more finish. The
+  phase in progress needs its scaled estimate less what it has taken. In the
+  example above, phase 1 took 3h against 2h, so the rest is taken to run at
+  1.25 times its estimates: 3h 05m more for phase 2 and 1h 15m for phase 3,
+  written to the nearest quarter of an hour as 4h 15m.
+
+The three header lines are written by `skills/plan/estimate.py`, which the
+skills run for you; the Plans pane shows "about 4h 15m left · 3h 40m spent",
+and a new conversation is told the same. To run it yourself:
+
+```
+python3 skills/plan/estimate.py docs/plans/checkout-flow.md            # work it out again
+python3 skills/plan/estimate.py docs/plans/checkout-flow.md --check    # print, change nothing
+python3 skills/plan/estimate.py docs/plans/checkout-flow.md --took 2=1h30m   # set a phase's time by hand
+```
+
+Change a phase's **Estimate** whenever the phase changes; the rest follows.
+What to know about the measure:
+
+- It is working time, not a date. A plan with 4h left is done this afternoon
+  or next month, depending on when the sessions happen.
+- It reads the session's record on the machine the session ran on. A session
+  that keeps no record adds nothing, and the script says so: set the time
+  with `--took`.
+- A stretch where a permission prompt sat unanswered, or the machine slept
+  mid-job, counts as work. Correct a phase that is plainly off with `--took`.
+- Time a session spent on other things before the phase began is counted to
+  the phase. `/next-phase` starts each phase in a cleared conversation, which
+  keeps it clean.
 
 ## Cleaning up after a phase
 
@@ -376,14 +436,15 @@ you have said so, for example with a line in the project's `CLAUDE.md`:
 ```
 claude plugin validate .     # the manifests and the hooks module, as the engine reads them
 claude plugin test .         # the mod's tests in tests/
-python3 -m unittest discover -s tests -p 'test_*.py'    # the import check's tests
+python3 -m unittest discover -s tests -p 'test_*.py'    # the import check's and the estimate's tests
 claude --plugin-dir .        # a session with this folder's copy loaded
 ```
 
 - `hooks/register.tsx`: the hooks, the pane and the three commands.
 - `hooks/plans.ts`: reading a plan file; no engine calls, so it is easy to test.
 - `types/index.d.ts`: what the mod keeps in the session's state.
-- `skills/`: the six skills, plain Markdown; `skills/map/layercheck.py` is the import check.
+- `skills/`: the six skills, plain Markdown; `skills/map/layercheck.py` is the import
+  check and `skills/plan/estimate.py` keeps the time estimate.
 - `agents/`: the two agent types.
 
 ## Licence

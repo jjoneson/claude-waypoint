@@ -39,7 +39,13 @@ the first of these that gives one:
      (`git status --short` on the files you touched; other changes there may
      belong to someone else).
 3. **Update** Decisions, Open questions and the header (`next` is the resume
-   step; `updated` is today's date).
+   step; `updated` is today's date). Then log the time, with N the phase in
+   progress:
+   `python3 "${CLAUDE_SKILL_DIR}/../plan/estimate.py" <the plan's file> --log N --session ${CLAUDE_SESSION_ID}`.
+   It adds what this session has spent working to the phase's **Took** and
+   writes what the plan still needs into the header; don't write those
+   yourself. If the rest of the phase now looks bigger or smaller than its
+   **Estimate** allows, change the estimate and run it again.
 4. **Don't change code.** End with one line on where things stand, then how to
    continue: `/next-phase <name>`, which clears the conversation and runs the
    phase skill (by hand: `/clear`, then this plugin's `phase` skill with the

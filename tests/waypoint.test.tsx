@@ -12,6 +12,7 @@ import {
   resolvePath,
   saysPhaseDone,
   tailOf,
+  timeLeft,
 } from '../hooks/plans'
 
 const PLAN = `---
@@ -754,6 +755,40 @@ test("a typed skill's plan becomes the session's in the pane, with no prompt hoo
   expect(await phases()).toBeUndefined()
   await $.command.run(typed('wp:phase', 'docs-site 2'))
   expect(await phases()).toBeDefined()
+})
+
+test("a plan's time left, as its header keeps it, is shown in the pane, on the line above the prompt and to a new conversation", async ($, on) => {
+  mock.clock(on, { now: 10_000 })
+  const TIMED = PLAN.replace('updated: 2026-01-15', 'estimate: 10h\nspent: 5h 30m\nremaining: 8h\nupdated: 2026-01-15')
+  const plan = parsePlan('docs-site', TIMED, 1)
+  expect(plan.remaining).toBe('8h')
+  expect(plan.spent).toBe('5h 30m')
+  expect(contextText([plan])).toContain('- docs-site (Docs site): active, phase 2 of 3; 1 open question; about 8h of work left. Next:')
+  // A figure that says nothing is left out: no line yet, `unknown`, nothing left, or a plan that is done.
+  expect(timeLeft(plan)).toBe('8h')
+  for (const silent of [parsePlan('a', PLAN, 1), { ...plan, remaining: 'unknown' }, { ...plan, remaining: '0m' }, { ...plan, status: 'done' }]) {
+    expect(timeLeft(silent)).toBe('')
+  }
+  expect(contextText([{ ...plan, remaining: 'unknown' }])).not.toContain('of work left')
+
+  on('fs.list', () => ({
+    value: [{ name: 'docs-site.md', kind: 'file', size: TIMED.length, mtimeMs: 5_000, isLink: false }],
+  }))
+  on('fs.read', () => ({ value: TIMED }))
+  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.status', () => ({ value: undefined }))
+  on('store.get', () => ({ value: true }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: /^about / }))?.text).toBe('about 8h left · 5h 30m spent')
+  await ui.unmount()
+  // The pane is put away here (the stored choice): the line above the prompt carries the figure.
+  const band = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect((await band.find({ type: 'Text', text: /^Plans:/ }))?.text).toContain('docs-site · phase 2/3 · active · ~8h left · 1 question')
+  await band.unmount()
 })
 
 test('a conversation already under way when the mod loads is not waited on for a SessionStart', async ($, on) => {

@@ -68,7 +68,10 @@ the first of these that gives one:
      through first, then ask that one again. Don't record a guess.
    - **Where an answer changes a phase** (what it does, its "Done when" or
      "Proved by", the order, a phase more or fewer): change the phase's text
-     and the header's `phases` to match, and say what you changed.
+     and the header's `phases` to match, and say what you changed. Change the
+     phase's **Estimate** with it, give a new phase one, and run
+     `python3 "${CLAUDE_SKILL_DIR}/../plan/estimate.py" <the plan's file>`,
+     which works out afresh what the plan still needs.
    - **The header:** `updated` is today's date; `next` only if the answers
      change what the next session does first.
    - When the last question is answered, the section keeps one bullet,

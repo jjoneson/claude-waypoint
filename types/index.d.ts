@@ -16,6 +16,10 @@ export type Plan = {
   phases: number | null
   next: string
   updated: string
+  /** The working time the plan still needs, as its header says (`8h`, `unknown`); '' with no such line. */
+  remaining: string
+  /** The working time its phases have taken so far, as its header says; '' with no such line. */
+  spent: string
   list: PhaseInfo[]
   /** Bullets under "## Open questions", placeholders left out. */
   questions: number

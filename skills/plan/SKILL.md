@@ -53,8 +53,18 @@ setting gives) under the working directory, which you make.
    `phase: 1`, `phases` is the count, `next` is one line, and `updated` is
    today's date. Record each decision with who made it. Remove the template's
    comment.
-5. **Stop there.** Don't start phase 1. End with the plan's path, one line per
-   phase, how many questions are still open (this plugin's `questions` skill
+5. **Guess the time.** Give every phase an `- **Estimate:**` of working time
+   (`45m`, `2h`, `1h 30m`): what a session will spend on it, your work and the
+   checks and jobs it waits on, not the time it waits for the user. It is a
+   rough guess and is meant to be: go by the size of the change and how long
+   the phase's proof takes to run, and by this plan's finished phases when
+   you are revising one. Don't pad it; what is left is corrected from how
+   the phases really go. Then run
+   `python3 "${CLAUDE_SKILL_DIR}/estimate.py" <the plan's file>`: it adds the
+   guesses up and writes `estimate`, `spent` and `remaining` into the header.
+   Run it again after any change to the phases or their estimates.
+6. **Stop there.** Don't start phase 1. End with the plan's path, one line per
+   phase with its estimate, the time in all, how many questions are still open (this plugin's `questions` skill
    goes through them with the user one by one), and how to start:
    `/next-phase <name>`, which clears the conversation and runs the phase
    skill (by hand: `/clear`, then this plugin's `phase` skill with the plan's

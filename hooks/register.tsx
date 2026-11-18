@@ -19,6 +19,7 @@ import {
   saysPhaseDone,
   statusText,
   tailOf,
+  timeLeft,
 } from './plans'
 
 const PLUGIN = 'wp'
@@ -44,7 +45,7 @@ const HOOKS_STOPPED = "waypoint: another hook stopped waypoint's session hooks; 
 
 // Change a tag when that value's fields change: it declines what an earlier
 // version stored, which outlives a reload.
-const plansAtom = atom({ plugin: 'wp', key: 'plans' } as const, [], { shape: 'plans-1' })
+const plansAtom = atom({ plugin: 'wp', key: 'plans' } as const, [], { shape: 'plans-2' })
 const currentAtom = atom({ plugin: 'wp', key: 'current' } as const, null, { shape: 'current-1' })
 const hiddenAtom = atom({ plugin: 'wp', key: 'isHidden' } as const, false)
 // The mod's `classic.*` hooks tell Claude the plans folder and title the session. A hook that runs ahead of them
@@ -855,6 +856,11 @@ export const register: Register = (on, options) => {
                 {plan.status}
                 {plan.phase !== null ? ` · phase ${plan.phase}${total ? `/${total}` : ''}` : ''} {bar}
               </Text>
+              {timeLeft(plan) ? (
+                <Text wrap="truncate-end">
+                  about {timeLeft(plan)} left{plan.spent ? ` · ${plan.spent} spent` : ''}
+                </Text>
+              ) : null}
               {isListed &&
                 plan.list.map(p => (
                   <Text dimColor={p.state === 'not started'} wrap="truncate-end">

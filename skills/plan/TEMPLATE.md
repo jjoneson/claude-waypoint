@@ -4,6 +4,9 @@ status: planning
 phase: 1
 phases: 2
 next: One line saying what the next session does first.
+estimate: 3h
+spent: 0m
+remaining: 3h
 updated: YYYY-MM-DD
 ---
 
@@ -20,7 +23,11 @@ The header is read by tools, so keep its keys and one value per line:
   phase    the phase in progress, or the next one to start
   phases   how many phases there are
   next     one line: the first thing the next session does
+  estimate, spent, remaining   working time, kept by the plan skill's estimate.py
+                               from each phase's Estimate and Took: don't edit
 Phase headings keep the form "### N. Name: not started | in progress | done".
+Each phase has an "Estimate" (a rough guess of working time: 45m, 2h, 1h 30m);
+its "Took" is added by estimate.py as sessions work on it.
 Delete this comment.
 -->
 
@@ -39,6 +46,7 @@ What the user gets when this is done, in two or three sentences.
 - **Does:** the change, in a few lines.
 - **Done when:** an observable result.
 - **Proved by:** a command (`make test`), a screenshot of X, or a try-out by the user.
+- **Estimate:** 1h 30m
 - **Notes:** filled in when the phase ends: what changed, files touched, surprises.
 
 ### 2. Name: not started
@@ -46,6 +54,7 @@ What the user gets when this is done, in two or three sentences.
 - **Does:**
 - **Done when:**
 - **Proved by:**
+- **Estimate:** 1h 30m
 
 ## Next
 

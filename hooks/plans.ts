@@ -112,6 +112,8 @@ export function parsePlan(name: string, text: string, mtimeMs: number): Plan {
     phases,
     next: header.next ?? '',
     updated: header.updated ?? '',
+    remaining: header.remaining ?? '',
+    spent: header.spent ?? '',
     list,
     questions: countQuestions(body),
     mtimeMs,
@@ -148,8 +150,20 @@ export function statusText(plan: Plan): string {
   const parts = [plan.name]
   if (plan.phase !== null) parts.push(`phase ${plan.phase}${plan.phases ? `/${plan.phases}` : ''}`)
   parts.push(plan.status)
+  const left = timeLeft(plan)
+  if (left) parts.push(`~${left} left`)
   if (plan.questions > 0) parts.push(`${plan.questions} question${plan.questions === 1 ? '' : 's'}`)
   return parts.join(' · ')
+}
+
+/**
+ * The working time a plan still needs, as its header's `remaining` says
+ * (`skills/plan/estimate.py` keeps it): `8h`, or '' where the plan is done, has
+ * no figure, or has one that says nothing (`unknown`, `0m`).
+ */
+export function timeLeft(plan: Plan): string {
+  const left = plan.remaining.trim()
+  return isOpen(plan) && /^\d/.test(left) && !/^0+\s*m?$/.test(left) ? left : ''
 }
 
 /** What the person types to run the phase skill and the questions skill, without the slash. */
@@ -169,7 +183,8 @@ export function contextText(
   const lines = open.map(p => {
     const where = p.phase !== null ? `phase ${p.phase}${p.phases ? ` of ${p.phases}` : ''}` : 'no phase yet'
     const asks = p.questions ? `; ${p.questions} open question${p.questions === 1 ? '' : 's'}` : ''
-    return `- ${p.name} (${p.title}): ${p.status}, ${where}${asks}. Next: ${p.next || 'see the plan'}`
+    const left = timeLeft(p) ? `; about ${timeLeft(p)} of work left` : ''
+    return `- ${p.name} (${p.title}): ${p.status}, ${where}${asks}${left}. Next: ${p.next || 'see the plan'}`
   })
   return [
     `Open project plans in ${dir}/ (from the waypoint mod; that is this project's plans folder):`,
