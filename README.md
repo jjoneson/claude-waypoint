@@ -229,7 +229,8 @@ type one of its skills and no prompt event follows. It then says so once in
 a toast, "waypoint: another hook stopped waypoint's session hooks; plans
 folder notes and session titles are off", and the Plans pane and `/plans-dir`
 show the warning with the plans folder in full, so you can say it to Claude.
-With no such hook, none of this appears.
+With no such hook, none of this appears. The skills also
+[find the folder themselves](#where-plans-are-kept) when the note is missing.
 
 ## Where plans are kept
 
@@ -264,6 +265,14 @@ setting back. The folder need not exist yet: the first plan written makes it.
 workspace says otherwise. `plans` makes it `plans/` in place of `docs/plans/`
 in every project. An absolute path, or one that starts with `~`, is one
 folder for all your projects.
+
+**When the mod's note does not arrive.** The skills are told the folder by
+the mod, in a note at the start of the conversation and beside each skill's
+command. Where that note is missing ([another hook in the way](#if-another-hook-is-in-the-way),
+or the hooks module not loaded), each skill finds the folder itself in the
+same order: the workspace's `.claude/waypoint.json`, then the `plansDir`
+setting as it is saved in `settings.json`, then the nearest `docs/plans/`. It
+says in one line which folder it took and what named it.
 
 **Which wins.** A workspace's file comes first: the nearest
 `.claude/waypoint.json` at or above the session's directory that names a

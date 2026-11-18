@@ -10,10 +10,23 @@ Arguments: $ARGUMENTS
 
 **The plans folder.** Plans are `<name>.md` files in one folder. It is the
 folder the waypoint mod names in this conversation: in its note at the
-start, or beside this command. If nothing names it, find it yourself: the
-nearest `.claude/waypoint.json` at or above the working directory whose
-`plansDir` names it (a path relative to the folder that holds `.claude`);
-with no such file, the nearest `docs/plans/` folder at or above it.
+start, or beside this command. If nothing in the conversation names it, the
+mod's note did not arrive: find the folder yourself before you read or write
+a plan, and say in one line which folder you took and what named it. Take
+the first of these that gives one:
+
+- **A workspace's own word:** the nearest `.claude/waypoint.json` at or above
+  the working directory. Its `plansDir` is the folder, as a path from the
+  folder that holds `.claude`.
+- **This plugin's `plansDir` setting,** which the person set when installing
+  it or in `/config`. Read `~/.claude/settings.json`: under `pluginConfigs`,
+  the entry named `wp@claude-waypoint` (or another whose name starts with
+  `wp`), at `options.plansDir`. The project's `.claude/settings.local.json`
+  and `.claude/settings.json` can hold the same entry, and theirs comes
+  first. A path that is absolute or starts with `~` is the folder. Any other
+  is the folder's name, to look for in place of `docs/plans` below.
+- **The usual place:** the nearest `docs/plans/` folder at or above the
+  working directory.
 
 1. **Find the plan:** the name given, else the plan this session has been
    working on, else ask.
