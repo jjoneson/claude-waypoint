@@ -31,16 +31,19 @@ code as it is. Keep them short. A map that tries to say everything is not read.
    - bulk that floods a search: `du -sh -- */ | sort -h | tail`, and which
      of those are assets, data, build output or vendored code;
    - the biggest source files:
-     `git ls-files -z -- '*.ts' '*.py' | xargs -0 wc -l | sort -n | tail`,
+     `git ls-files -z -- '*.ts' '*.py' '*.java' | xargs -0 wc -l | sort -n | tail`,
      with the project's own extensions;
-   - the checks: what the package scripts, Makefile or CI run, and how long
-     the ones run on every change take (time them once, through the `checker`
-     agent if the output is long).
+   - the checks: what the package scripts, the Makefile, Maven or Gradle
+     (`./mvnw verify`, `./gradlew check`) or CI run, and how long the ones
+     run on every change take (time them once, through the `checker` agent if
+     the output is long).
 2. **Draft the module map.**
-   `python3 "${CLAUDE_SKILL_DIR}/layercheck.py" --draft` (add `--root <dir>`
-   if the source is not in `src/`) prints a table of what each directory
-   imports today, and which pairs import each other. That is the code's map,
-   not yet the intended one. With the user:
+   `python3 "${CLAUDE_SKILL_DIR}/layercheck.py" --draft` prints a table of
+   what each directory imports today, and which pairs import each other. It
+   takes `src/` as the source folder, or in a Java or Kotlin project the base
+   package's folder (`src/main/java/com/acme/shop`), where the rows are the
+   sub-packages; `--root <dir>` names another. That is the code's map, not
+   yet the intended one. With the user:
    - fill "What it owns" for each row, one clause, from reading the
      directory's entry points (a `scout` agent for a directory you don't know);
    - for each pair that import each other, decide which way it should go; the
@@ -49,7 +52,12 @@ code as it is. Keep them short. A map that tries to say everything is not read.
    - an import that should not be there and is not fixed today goes in the
      known-exceptions table with what it is for, not into a looser row;
    - a directory large enough to be lost in gets a table of its own folders
-     (`<!-- layercheck: within=<dir> -->`).
+     (`<!-- layercheck: within=<dir> -->`);
+   - in a build of several modules (Maven modules, Gradle subprojects), each
+     module gets its own `docs/architecture.md` for the packages inside it,
+     drafted and checked from the module's folder. Which module may use which
+     is the build's to say, and it already holds that line: put it in the top
+     CLAUDE.md as a table of the modules, not in a map.
 
    Write it to `docs/architecture.md` from
    `${CLAUDE_SKILL_DIR}/ARCHITECTURE-TEMPLATE.md`. The top of `layercheck.py`
@@ -58,9 +66,13 @@ code as it is. Keep them short. A map that tries to say everything is not read.
    repository (`tools/layercheck.py`, or where its scripts live) so it runs
    without this plugin and in CI, and give it a name the project uses: a
    package script (`"layercheck": "python3 tools/layercheck.py"`), a Makefile
-   target. Run it until it passes. It reads JavaScript, TypeScript and Python;
-   for another language keep the page in the same form and say in the report
-   that its imports are not checked yet.
+   target, a Gradle `Exec` task that `check` depends on, a step in the CI
+   file. Run it until it passes. It reads JavaScript, TypeScript, Python,
+   Java and Kotlin; for another language keep the page in the same form and
+   say in the report that its imports are not checked yet. Where a Java
+   project already holds its layers with ArchUnit tests, don't add a second
+   check: write the page to say what those tests enforce, and name them as
+   the check.
 4. **Write the index** in CLAUDE.md from
    `${CLAUDE_SKILL_DIR}/CLAUDE-TEMPLATE.md`, keeping whatever the file already
    says that is still true. Take only the sections the project needs:

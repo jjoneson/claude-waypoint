@@ -5,7 +5,8 @@
     python3 layercheck.py --quiet          print only what fails
     python3 layercheck.py --draft          print the map as the code stands today, to start one from
     --map FILE   the map (default docs/architecture.md)
-    --root DIR   the source folder the map's paths are under (default: what the map says, else src/, else .)
+    --root DIR   the source folder the map's paths are under (default: what the map says; else the base
+                 package's folder under src/main/java or src/main/kotlin; else src/; else .)
 
 The map is the document people and agents read, so there is one map and it
 cannot drift from the code. In it, every Markdown table with a "May import"
@@ -43,8 +44,31 @@ leaves out, a name in the map that is no longer there, and a known exception
 that nothing matches any more. Exit status 1 when anything fails.
 
 It reads JavaScript and TypeScript (static and dynamic imports, re-exports,
-require, `new URL('…', import.meta.url)`) and Python. Imports of packages and
-of files outside the source folder are not its business. No dependencies.
+require, `new URL('…', import.meta.url)`), Python, Java and Kotlin. Imports of
+packages and of files outside the source folder are not its business. No
+dependencies.
+
+Java and Kotlin. An import names a class by its package, so the source folder
+is the base package's folder and the rows are its sub-packages:
+
+    <!-- layercheck: root=src/main/java/com/acme/shop -->
+
+    | Directory | What it owns | May import |
+    | --- | --- | --- |
+    | `ShopApplication.java` | the entry | nothing else |
+    | `web/` | controllers | `service/`, `domain/` |
+    | `service/` | use cases | `repository/`, `domain/` |
+    | `repository/` | persistence | `domain/` |
+    | `domain/` | entities | nothing else |
+
+`import com.acme.shop.domain.Order;` is an import of `domain/Order.java`, and
+so are its nested classes and static members. `import com.acme.shop.domain.*;`
+is an import of all of `domain/` (shown as `domain/*`), and so is an import of
+a name no file is called after: a Kotlin function, a generated class. Classes
+of the same package need no import and are one place anyway. A class used by
+its full name with no import is not seen. There are no type-only imports. In
+a build of several modules, give each module its own map and run this from
+the module's folder: between modules the build's own dependencies hold the line.
 """
 
 from __future__ import annotations
@@ -60,6 +84,7 @@ from pathlib import Path
 
 JS = (".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs")
 PY = (".py",)
+JVM = (".java", ".kt")
 SKIP_DIRS = {"node_modules", "dist", "build", "out", "target", "coverage", "__pycache__", "venv", "site-packages"}
 
 
@@ -184,7 +209,7 @@ def sources(root: Path, ignore: list[str]) -> list[str]:
             if not d.startswith(".") and d not in SKIP_DIRS and (f"{rel}/{d}" if rel else d) not in ignore
         )
         for name in sorted(files):
-            if name.endswith(JS + PY) and not name.endswith((".d.ts", ".d.mts", ".d.cts")):
+            if name.endswith(JS + PY + JVM) and not name.endswith((".d.ts", ".d.mts", ".d.cts")):
                 out.append(f"{rel}/{name}" if rel else name)
     return out
 
@@ -351,17 +376,65 @@ def py_target(root: Path, file: str, parts: list[str], level: int, name: str | N
     return None
 
 
+JVM_PACKAGE = re.compile(r"^\s*package\s+([\w.]+)", re.M)
+JVM_IMPORT = re.compile(r"^[ \t]*import\s+(?:static\s+)?([\w.]+?)(\.\*)?[ \t]*(?:as\s+\w+[ \t]*)?;?[ \t]*$", re.M)
+# Imports come before the first declaration; what looks like one further down is inside a text block.
+JVM_BODY = re.compile(
+    r"^[ \t]*(?:(?:public|private|protected|internal|abstract|final|sealed|non-sealed|static|strictfp|open|data|value"
+    r"|inline|annotation|expect|actual)\s+)*(?:class|interface|enum|record|object|fun|val|var|typealias|@interface)\b",
+    re.M,
+)
+
+
+def jvm_scan(text: str) -> tuple[str, list[tuple[str, bool, int]]]:
+    """A Java or Kotlin file's package, and each import: the name, whether it ends in `.*`, and its line."""
+    code, _ = blank_comments(text)
+    body = JVM_BODY.search(code)
+    head = code[:body.start()] if body else code
+    package = JVM_PACKAGE.search(head)
+    imports = [(m.group(1), bool(m.group(2)), head.count("\n", 0, m.start(1)) + 1) for m in JVM_IMPORT.finditer(head)]
+    return (package.group(1) if package else ""), imports
+
+
+@dataclass
+class JvmIndex:
+    """The Java and Kotlin classes in the source folder, by full name, and the folders of each package."""
+    classes: dict[str, str] = field(default_factory=dict)
+    packages: dict[str, set[str]] = field(default_factory=dict)
+
+    def add(self, file: str, package: str) -> None:
+        stem = os.path.splitext(os.path.basename(file))[0]
+        self.classes.setdefault(f"{package}.{stem}" if package else stem, file)
+        self.packages.setdefault(package, set()).add(os.path.dirname(file))
+
+    def targets(self, name: str, wildcard: bool) -> list[str]:
+        """What an import names under root: a class's file, or all of a package's folder as `folder/*`."""
+        parts = name.split(".")
+        for i in range(len(parts), 0, -1):      # the class itself, or the class a nested class or member is in
+            hit = self.classes.get(".".join(parts[:i]))
+            if hit:
+                return [hit]
+        package = name if wildcard else ".".join(parts[:-1])
+        return [f"{folder}/*" if folder else "*" for folder in sorted(self.packages.get(package, ()))]
+
+
 def edges_of(root: Path, files: list[str], aliases: list[tuple[str, str]]) -> tuple[list[Edge], list[str]]:
     tops = {f.split("/")[0] for f in files if "/" in f}
     edges: list[Edge] = []
     unread: list[str] = []
+    index = JvmIndex()
+    jvm: list[tuple[str, list[tuple[str, bool, int]]]] = []
     for file in files:
         try:
             text = (root / file).read_text(encoding="utf-8", errors="replace")
         except OSError as e:
             unread.append(f"{file}: {e}")
             continue
-        if file.endswith(PY):
+        if file.endswith(JVM):
+            package, imports = jvm_scan(text)
+            index.add(file, package)
+            jvm.append((file, imports))         # followed below, once every class is known
+        elif file.endswith(PY):
             try:
                 found = py_imports(text, file)
             except SyntaxError as e:
@@ -375,6 +448,10 @@ def edges_of(root: Path, files: list[str], aliases: list[tuple[str, str]]) -> tu
                 to = js_target(root, file, spec, aliases, tops)
                 if to and to != file:
                     edges.append(Edge(file, to, line, types))
+    for file, imports in jvm:
+        own = f"{os.path.dirname(file)}/*" if "/" in file else "*"
+        for name, wildcard, line in imports:
+            edges += [Edge(file, to, line, False) for to in index.targets(name, wildcard) if to not in (file, own)]
     return edges, unread
 
 
@@ -507,7 +584,7 @@ def draft(root: Path, m: Map, label: str) -> int:
     takes: dict[str, dict[str, set[str]]] = {p: {} for p in places}
     for e in edges:
         a, b = top(e.src), top(e.to)
-        if a != b:
+        if a != b and e.to != "*":
             takes[a].setdefault(b, set()).add(e.to)
     print(f"<!-- layercheck: root={label} -->\n")
     print("| Directory | What it owns | May import |\n| --- | --- | --- |")
@@ -517,7 +594,7 @@ def draft(root: Path, m: Map, label: str) -> int:
             mutual = place in takes.get(other, {})
             few = sorted(takes[place][other])
             # Where two directories import each other, the one that takes little is given just those files.
-            if mutual and len(few) <= 3 and len(few) <= len(takes[other][place]):
+            if mutual and len(few) <= 3 and len(few) <= len(takes[other][place]) and not any(f.endswith("*") for f in few):
                 names += [f"`{f}`" for f in few]
             else:
                 names.append(f"`{other}`")
@@ -528,6 +605,21 @@ def draft(root: Path, m: Map, label: str) -> int:
         for a, b in cycles:
             print(f"- `{a}` and `{b}`: {len(takes[a][b])} file(s) one way, {len(takes[b][a])} the other")
     return 0
+
+
+def guess_root() -> str:
+    """The source folder where nothing names it: a Java or Kotlin base package's folder, else src/, else here."""
+    for base in ("src/main/java", "src/main/kotlin"):
+        folder = Path(base)
+        if not folder.is_dir():
+            continue
+        while True:                              # down through com/acme/shop, to the first folder that holds more
+            entries = [e for e in folder.iterdir() if not e.name.startswith(".")]
+            inner = [e for e in entries if e.is_dir()]
+            if len(inner) != 1 or len(entries) != 1:
+                return folder.as_posix()
+            folder = inner[0]
+    return "src" if Path("src").is_dir() else "."
 
 
 def main() -> int:
@@ -546,7 +638,7 @@ def main() -> int:
     else:
         print(f"no map at {path}: write one (start from --draft), or name it with --map", file=sys.stderr)
         return 2
-    label = (args.root or m.root or ("src" if Path("src").is_dir() else ".")).strip("/") or "."
+    label = (args.root or m.root or guess_root()).strip("/") or "."
     root = Path(label)
     if not root.is_dir():
         print(f"the source folder {label}/ is not there (run this from the repository's top folder)", file=sys.stderr)

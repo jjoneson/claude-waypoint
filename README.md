@@ -131,10 +131,54 @@ exception that nothing matches any more. A large directory can have a table
 of its own folders. The top of `skills/map/layercheck.py` says how every part
 reads, and `skills/map/ARCHITECTURE-TEMPLATE.md` is a whole page to start from.
 
-It reads JavaScript, TypeScript and Python imports and needs Python 3 and
-nothing else. It works from the text of the files, not a compiler; run over
-a large TypeScript codebase it found the same offending imports as that
-project's own compiler-based check.
+It reads JavaScript, TypeScript, Python, Java and Kotlin imports and needs
+Python 3 and nothing else. It works from the text of the files, not a
+compiler; run over a large TypeScript codebase it found the same offending
+imports as that project's own compiler-based check.
+
+### Java and Spring Boot
+
+A Java import names a class by its package, so the source folder is the base
+package's folder and the rows are its sub-packages. `--draft` finds that
+folder by itself under `src/main/java` (or `src/main/kotlin`):
+
+```markdown
+<!-- layercheck: root=src/main/java/com/acme/shop -->
+
+| Directory | What it owns | May import |
+| --- | --- | --- |
+| `ShopApplication.java` | the entry | nothing else |
+| `web/` | controllers and what they take and answer | `service/`, `domain/` |
+| `service/` | use cases and transactions | `repository/`, `domain/` |
+| `repository/` | Spring Data repositories | `domain/` |
+| `domain/` | entities and value types | nothing else |
+| `config/` | beans and properties | anything |
+```
+
+That is a layered application; one laid out by feature has rows such as
+`orders/` and `billing/`, and a feature with layers of its own gets a table
+of its folders. How Java is read:
+
+- `import com.acme.shop.domain.Order;` is an import of `domain/Order.java`,
+  and so are its nested classes and static members.
+- `import com.acme.shop.domain.*;` is an import of all of `domain/`. An
+  allowance for one file does not cover it.
+- Kotlin files are read the same way. An imported function or property has no
+  file named after it, so it counts as an import of its whole package.
+- Tests under `src/test/` are outside the source folder: not mapped, and free
+  to import anything.
+- Not seen: a class used by its full name with no import, and what Spring
+  wires at run time. The check is about what the source says it depends on.
+- **Several modules** (Maven modules, Gradle subprojects): give each module
+  its own `docs/architecture.md` and run the check from the module's folder.
+  Which module may use which is already held by the build's dependencies.
+- If the project already has ArchUnit tests for its layers, keep those as the
+  check and let the page say what they enforce.
+
+Nothing else here depends on the language: the agents run whatever checks
+`CLAUDE.md` names (`./mvnw verify`, `./gradlew check`), and the clean-up
+script stops an application left running by `spring-boot:run` or `bootRun`
+like any other server, by the port it listens on and the folder it runs in.
 
 **The agents.** `scout` is read-only and answers "where does this happen"
 with `path:line` references and a short explanation, not file contents.

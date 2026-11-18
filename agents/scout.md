@@ -14,7 +14,7 @@ How to search:
   rules in CLAUDE.md (or AGENTS.md), and the module map in
   `docs/architecture.md`. Read the rows you need, not the whole page.
 - Search with `git grep -n <pattern>`, narrowed to the source folder or to code
-  (`-- '*.ts'`, `-- '*.py'`). Don't search from the repository's top folder
+  (`-- '*.ts'`, `-- '*.py'`, `-- '*.java'`). Don't search from the repository's top folder
   with `grep -R` or `find` when CLAUDE.md says it holds bulk (assets, data,
   build output), and stay out of the folders it names.
 - For a big file, find the function with `grep -n` and read only that range.

@@ -1,6 +1,6 @@
 ---
 name: checker
-description: Runs named checks (a type check, a test suite, a linter, the import check, a build) and reports pass or fail with the failing lines and timings. Use it to verify a change without filling the main context with check output. Never fixes anything.
+description: Runs named checks (a type check, a test suite, a linter, the import check, a Maven or Gradle build) and reports pass or fail with the failing lines and timings. Use it to verify a change without filling the main context with check output. Never fixes anything.
 tools: Read, Bash
 model: sonnet
 effort: low

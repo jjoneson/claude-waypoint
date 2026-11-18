@@ -237,6 +237,221 @@ class Python(unittest.TestCase):
         self.assertIn("app/core/bad.py:1 imports app/web/views.py", out)
 
 
+SHOP = "src/main/java/com/acme/shop"
+SPRING_FILES = {
+    f"{SHOP}/ShopApplication.java": """
+        package com.acme.shop;
+
+        import org.springframework.boot.SpringApplication;
+        import org.springframework.boot.autoconfigure.SpringBootApplication;
+
+        @SpringBootApplication
+        public class ShopApplication {
+            public static void main(String[] args) { SpringApplication.run(ShopApplication.class, args); }
+        }
+    """,
+    f"{SHOP}/web/OrderController.java": """
+        package com.acme.shop.web;
+
+        import java.util.List;
+        import org.springframework.web.bind.annotation.*;
+        import com.acme.shop.domain.Order;
+        import com.acme.shop.service.OrderService;
+
+        @RestController
+        public class OrderController {
+            private final OrderService orders;
+            OrderController(OrderService orders) { this.orders = orders; }
+            @GetMapping("/orders") List<Order> all() { return orders.open(); }
+        }
+    """,
+    f"{SHOP}/service/OrderService.java": """
+        package com.acme.shop.service;
+
+        import com.acme.shop.domain.*;
+        import com.acme.shop.repository.OrderRepository;
+        import org.springframework.stereotype.Service;
+
+        @Service
+        public class OrderService {
+            private final OrderRepository repository;
+            public OrderService(OrderRepository repository) { this.repository = repository; }
+            public java.util.List<Order> open() { return repository.findByStatus(Order.Status.OPEN); }
+        }
+    """,
+    f"{SHOP}/repository/OrderRepository.java": """
+        package com.acme.shop.repository;
+
+        import static com.acme.shop.domain.Order.Status.OPEN;
+
+        import com.acme.shop.domain.Order;
+        import com.acme.shop.domain.Order.Status;
+        import org.springframework.data.jpa.repository.JpaRepository;
+
+        public interface OrderRepository extends JpaRepository<Order, Long> {
+            java.util.List<Order> findByStatus(Status status);
+            default java.util.List<Order> open() { return findByStatus(OPEN); }
+        }
+    """,
+    f"{SHOP}/domain/Order.java": '''
+        package com.acme.shop.domain;
+
+        // import com.acme.shop.web.OrderController;   a comment is not an import
+        /* import com.acme.shop.service.OrderService; */
+        import jakarta.persistence.Entity;
+
+        @Entity
+        public class Order {
+            public enum Status { OPEN, PAID }
+            static final String HELP = """
+                import com.acme.shop.web.OrderController;
+                """;
+        }
+    ''',
+    f"{SHOP}/config/WebConfig.java": """
+        package com.acme.shop.config;
+
+        import com.acme.shop.web.OrderController;
+        import com.acme.shop.repository.OrderRepository;
+
+        public class WebConfig { OrderController c; OrderRepository r; }
+    """,
+    # Tests are outside the source folder: not mapped, and free to import anything.
+    "src/test/java/com/acme/shop/domain/OrderTest.java": """
+        package com.acme.shop.domain;
+
+        import com.acme.shop.web.OrderController;
+
+        class OrderTest { OrderController c; }
+    """,
+}
+
+SPRING_MAP = f"""
+    # Architecture
+
+    <!-- layercheck: root={SHOP} -->
+
+    | Directory | What it owns | May import |
+    | --- | --- | --- |
+    | `ShopApplication.java` | the entry | nothing else |
+    | `web/` | controllers and what they take and answer | `service/`, `domain/` |
+    | `service/` | use cases and transactions | `repository/`, `domain/` |
+    | `repository/` | Spring Data repositories | `domain/` |
+    | `domain/` | entities and value types | nothing else |
+    | `config/` | beans and properties | anything |
+"""
+
+
+class Java(unittest.TestCase):
+    """A Spring Boot application: the source folder is its base package's, and the rows are its sub-packages."""
+
+    def setUp(self) -> None:
+        self.tree = Tree(SPRING_FILES, SPRING_MAP)
+        self.addCleanup(self.tree.close)
+
+    def test_layers_that_keep_to_the_map_pass(self) -> None:
+        code, out = run(self.tree.top)
+        self.assertEqual(code, 0, out)
+        # 2 from web, 2 from service, 3 from repository, 2 from config; nothing from the framework or the JDK.
+        self.assertIn("ok: 9 imports in 6 files keep to the map", out)
+
+    def test_a_layer_that_reaches_up_fails_with_its_line(self) -> None:
+        self.tree.write(f"{SHOP}/domain/Audit.java", """
+            package com.acme.shop.domain;
+
+            import com.acme.shop.service.OrderService;
+
+            class Audit { OrderService s; }
+        """)
+        code, out = run(self.tree.top)
+        self.assertEqual(code, 1, out)
+        self.assertIn("FAIL  domain/ may import nothing else", out)
+        self.assertIn(f"{SHOP}/domain/Audit.java:4 imports {SHOP}/service/OrderService.java", out)
+
+    def test_a_wildcard_takes_the_whole_package_and_a_nested_class_its_file(self) -> None:
+        self.tree.write(f"{SHOP}/repository/Peek.java", """
+            package com.acme.shop.repository;
+
+            import com.acme.shop.web.*;
+            import com.acme.shop.service.OrderService.Missing;
+
+            class Peek { }
+        """)
+        code, out = run(self.tree.top)
+        self.assertEqual(code, 1, out)
+        self.assertIn(f"{SHOP}/repository/Peek.java:4 imports {SHOP}/web/*", out)
+        self.assertIn(f"{SHOP}/repository/Peek.java:5 imports {SHOP}/service/OrderService.java", out)
+
+    def test_kotlin_is_read_and_a_function_is_an_import_of_its_package(self) -> None:
+        self.tree.write(f"{SHOP}/repository/Queries.kt", """
+            package com.acme.shop.repository
+
+            import com.acme.shop.domain.Order
+
+            fun openOrders(): List<Order> = emptyList()
+        """)
+        self.tree.write(f"{SHOP}/web/Routes.kt", """
+            package com.acme.shop.web
+
+            import com.acme.shop.service.OrderService as Orders
+            import com.acme.shop.repository.openOrders
+
+            fun routes(orders: Orders) = openOrders()
+        """)
+        code, out = run(self.tree.top)
+        self.assertEqual(code, 1, out)
+        self.assertIn("FAIL  web/ may import service/ and domain/", out)
+        self.assertIn(f"{SHOP}/web/Routes.kt:5 imports {SHOP}/repository/*", out)
+        self.assertNotIn("Routes.kt:4", out)
+
+    def test_a_feature_package_has_a_table_of_its_own_layers(self) -> None:
+        self.tree.write(f"{SHOP}/billing/web/InvoiceController.java", """
+            package com.acme.shop.billing.web;
+
+            import com.acme.shop.billing.domain.Invoice;
+            import com.acme.shop.domain.Order;
+
+            class InvoiceController { Invoice i; Order o; }
+        """)
+        self.tree.write(f"{SHOP}/billing/domain/Invoice.java", "package com.acme.shop.billing.domain;\n\npublic class Invoice { }\n")
+        # The feature's row joins the table; its own table follows.
+        self.tree.write("docs/architecture.md", SPRING_MAP.rstrip() + """
+    | `billing/` | invoices, by feature | `domain/` |
+
+    <!-- layercheck: within=billing -->
+
+    | Folder | May import |
+    | --- | --- |
+    | `web/` | `domain/` |
+    | `domain/` | nothing else |
+""")
+        code, out = run(self.tree.top)
+        self.assertEqual(code, 0, out)
+        self.tree.write(f"{SHOP}/billing/domain/Late.java", """
+            package com.acme.shop.billing.domain;
+
+            import com.acme.shop.billing.web.InvoiceController;
+
+            class Late { }
+        """)
+        code, out = run(self.tree.top)
+        self.assertEqual(code, 1, out)
+        self.assertIn("FAIL  billing/domain/ may import nothing else", out)
+        self.assertIn(f"{SHOP}/billing/domain/Late.java:4 imports {SHOP}/billing/web/InvoiceController.java", out)
+
+    def test_a_draft_finds_the_base_package_and_is_a_map_the_tree_passes(self) -> None:
+        (self.tree.top / "docs" / "architecture.md").unlink()
+        code, out = run(self.tree.top, "--draft")
+        self.assertEqual(code, 0, out)
+        self.assertIn(f"<!-- layercheck: root={SHOP} -->", out)
+        self.assertIn("| `service/` |  | `domain/`, `repository/` |", out)
+        self.assertIn("| `domain/` |  | nothing else |", out)
+        self.assertIn("| `ShopApplication.java` |  | nothing else |", out)
+        self.tree.write("docs/architecture.md", out)
+        code, out = run(self.tree.top)
+        self.assertEqual(code, 0, out)
+
+
 class Template(unittest.TestCase):
     """The page the map skill starts a project's docs/architecture.md from reads as a map."""
 
