@@ -1,6 +1,6 @@
 {
   "name": "wp",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Keeps an agent's context small in a large codebase. Maps: an index in CLAUDE.md, a module map in docs/architecture.md with a check that holds the code to it, and scout and checker agents. Plans: multi-phase project plans in docs/plans/ or a folder you name, one phase per session. Skills write a plan, run a phase, put its open questions to you, hand off and clean up; a pane shows the plans, names sessions after their plan and phase, starts the next phase in a cleared context (a button, or /next-phase), and reminds Claude to update a plan when it finishes a phase",
   "author": { "name": "jjoneson" },
   "license": "MIT",

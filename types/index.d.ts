@@ -35,6 +35,8 @@ declare module 'claude-code' {
       isStartStopped: boolean
       /** A skill was typed and its `classic.UserPromptSubmit` did not reach the mod. */
       isPromptStopped: boolean
+      /** What is wrong with reading the plans folder, for the pane to say; null when nothing is. */
+      readError: Shaped<string | null>
     }
   }
 }

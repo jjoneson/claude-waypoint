@@ -1,8 +1,11 @@
+import type { SessionMessage } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
+import type { TestBody } from 'claude-code/testing'
 
 import {
   configuredDir,
   contextText,
+  homeFrom,
   isAbsolute,
   parsePlan,
   planNameOf,
@@ -537,9 +540,9 @@ const STOPPED = "waypoint: another hook stopped waypoint's session hooks; plans 
  * set and empty: what a person sees when a plan went somewhere else. Toasts and every command run are noted.
  */
 const stoppedSession = async (
-  $: Parameters<Parameters<typeof test>[1]>[0],
-  on: Parameters<Parameters<typeof test>[1]>[1],
-  messages: unknown[] = [],
+  $: Parameters<TestBody>[0],
+  on: Parameters<TestBody>[1],
+  messages: SessionMessage[] = [],
 ) => {
   const clock = mock.clock(on, { now: 100_000 })
   const toasts: string[] = []
@@ -622,7 +625,7 @@ test('with no hook in the way, nothing is said: the two events may come in eithe
   await wait(4_000)
 
   // A /clear: the cleared conversation's SessionStart follows, and is waited for the same way.
-  await $.session.end({ reason: 'clear' })
+  await $.session.end({ reason: 'clear', sessionId: 'test-session', resume: { id: 'test-session' } })
   await wait(1_000)
   await $.classic.SessionStart({ source: 'clear' })
   await wait(20_000)
@@ -653,6 +656,104 @@ test("a typed skill whose prompt hook never ran is noticed; Claude Code's own /p
   expect(toasts).toEqual([STOPPED])
   expect(await paneText(/^Plans folder:/)).toBe(`Plans folder: ${DOCS_PLANS}/`)
   expect(ran).toEqual(['/plan docs-site', '/wp:questions docs-site', '/wp:plan docs-site'])
+})
+
+test("a plans folder written with ~ is found where the environment cannot be read, from where the session sits", { options: { plansDir: '~/git/acme/platform-docs/plans' } }, async ($, on) => {
+  mock.clock(on, { now: 10_000 })
+  const listed: string[] = []
+  // The home folder is worked out from paths under it, where no HOME can be had.
+  expect(homeFrom(['/home/u/git/acme/api'])).toBe('/home/u')
+  expect(homeFrom(['/srv/build', 'C:\\Users\\u\\work'])).toBe('C:/Users/u')
+  expect(homeFrom(['/srv/build', '/data/people/u/.claude/plugins/cache/x/wp'])).toBe('/data/people/u')
+  expect(homeFrom(['/srv/build'])).toBe('')
+
+  on('env.get', () => {
+    throw new Error('refused: a mod in the user tier does not read the environment here')
+  })
+  on('session.cwd', () => ({ value: '/Users/u/git/acme/api' }))
+  on('session.root', () => ({ value: '/Users/u/git/acme/api' }))
+  on('fs.exists', () => ({ value: false }))
+  on('fs.read', () => ({ value: PLAN }))
+  on('fs.list', (_, e) => {
+    listed.push(e.path)
+    return { value: [{ name: 'docs-site.md', kind: 'file', size: PLAN.length, mtimeMs: 5_000, isLink: false }] }
+  })
+  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.status', () => ({ value: undefined }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+
+  await $.session.start({ cwd: '/Users/u/git/acme/api', surface: 'terminal', isInteractive: true })
+  expect(listed).toEqual(['/Users/u/git/acme/platform-docs/plans'])
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /docs-site/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a plans folder that cannot be read says so in the pane and in /plans-dir, and stops saying so once it can', async ($, on) => {
+  const clock = mock.clock(on, { now: 10_000 })
+  let isRefused = true
+  on('session.cwd', () => ({ value: WORK }))
+  on('session.root', () => ({ value: WORK }))
+  on('fs.exists', (_, e) => ({ value: e.path === `${WORK}/docs/plans` }))
+  on('fs.read', () => ({ value: PLAN }))
+  on('fs.list', () => {
+    if (isRefused) throw new Error('EACCES: permission denied')
+    return { value: [{ name: 'docs-site.md', kind: 'file', size: PLAN.length, mtimeMs: 5_000, isLink: false }] }
+  })
+  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.status', () => ({ value: undefined }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  const shown = async (text: RegExp) => {
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    const found = await ui.find({ type: 'Text', text })
+    await ui.unmount()
+    return found?.text
+  }
+
+  await $.session.start({ cwd: WORK, surface: 'terminal', isInteractive: true })
+  // (The test kit puts its own words in place of a test hook's error; a session gives the refusal's.)
+  expect(await shown(/^The plans folder/)).toContain(`${WORK}/docs/plans/ is there and could not be read: `)
+  const said = (await $.command.run(typed('plans-dir'))).text ?? ''
+  expect(said).toContain(`The plans folder is there and could not be read: `)
+  // The same answer counts the events that have reached the mod: here the session's start and nothing else yet.
+  expect(said).toContain('Reached the mod since it loaded: session start 1, conversation start 0, prompts 0, tool calls 0, stops 0, refresh ticks 0.')
+
+  // The next tick reads it: the plan is listed and the complaint is gone.
+  isRefused = false
+  await clock.advance(5_000)
+  for (let i = 0; i < 50; i++) await Promise.resolve()
+  expect(await shown(/docs-site/)).toBeDefined()
+  expect(await shown(/^The plans folder/)).toBeUndefined()
+  expect((await $.command.run(typed('plans-dir'))).text).toContain('refresh ticks 1.')
+})
+
+test("a typed skill's plan becomes the session's in the pane, with no prompt hook to say so", async ($, on) => {
+  mock.clock(on, { now: 10_000 })
+  on('fs.list', () => ({
+    value: [{ name: 'docs-site.md', kind: 'file', size: PLAN.length, mtimeMs: 5_000, isLink: false }],
+  }))
+  on('fs.read', () => ({ value: PLAN.replace('status: active', 'status: paused') }))
+  on('fs.exists', (_, e) => ({ value: e.path.endsWith('/skills/phase/SKILL.md') }))
+  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.status', () => ({ value: undefined }))
+  on('ui.toast', () => ({ value: undefined }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('command.run', () => ({}))
+  const phases = async () => {
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    const found = await ui.find({ type: 'Text', text: /2\. Search/ })
+    await ui.unmount()
+    return found
+  }
+
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  // A paused plan that is nobody's has no phases listed.
+  expect(await phases()).toBeUndefined()
+  await $.command.run(typed('wp:phase', 'docs-site 2'))
+  expect(await phases()).toBeDefined()
 })
 
 test('a conversation already under way when the mod loads is not waited on for a SessionStart', async ($, on) => {

@@ -36,6 +36,25 @@ export function resolvePath(base: string, path: string, home = ''): string {
 }
 
 /**
+ * The person's home folder, worked out from paths that sit under it, for where
+ * the environment cannot be read: `/home/<name>`, `/Users/<name>` or
+ * `C:/Users/<name>` at the head of one, else what a path has before
+ * `/.claude/plugins/`. Empty when none says.
+ */
+export function homeFrom(paths: readonly string[]): string {
+  const all = paths.map(path => path.replace(/\\/g, '/'))
+  for (const path of all) {
+    const named = /^((?:[A-Za-z]:)?\/(?:home|Users)\/[^/]+)(?:\/|$)/.exec(path)
+    if (named) return named[1]!
+  }
+  for (const path of all) {
+    const before = /^(.+?)\/\.claude\/plugins\//.exec(path)
+    if (before) return before[1]!
+  }
+  return ''
+}
+
+/**
  * The folder a workspace's config file names, as written there; `null` when
  * the file names none. Throws when the file is not JSON or the value is not text.
  */

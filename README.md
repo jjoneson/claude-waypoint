@@ -232,6 +232,42 @@ show the warning with the plans folder in full, so you can say it to Claude.
 With no such hook, none of this appears. The skills also
 [find the folder themselves](#where-plans-are-kept) when the note is missing.
 
+**Why it happens.** Claude Code has a security mod of its own built in
+(`cc-plugin-sec-default`). Where an organization's managed settings are in
+force, it can send some events past the mods a person installed themselves.
+That is the organization's control to hold, and this mod does not try to get
+round it. With it in the way:
+
+- still working: the Plans pane and its buttons, `/plans`, `/next-phase`,
+  `/plans-dir`, and every skill, which finds the plans folder for itself;
+- not working: Claude being told the folder and the open plans when a
+  conversation starts, sessions named after their plan and phase, and the
+  nudge to update a plan left stale.
+
+**To have all of it,** the organization seats the plugin. According to Claude
+Code's notes on how a plugin's tier is decided, a plugin from a marketplace
+that the managed settings declare and turn on runs in the organization's own
+tier, where its hooks are not passed over:
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "claude-waypoint": { "source": { "source": "github", "repo": "jjoneson/claude-waypoint" } }
+  },
+  "enabledPlugins": { "wp@claude-waypoint": true }
+}
+```
+
+That goes in the managed settings, which is for whoever looks after them to
+decide; it has not been tried from here.
+
+**Finding out what is stopped.** `/plans-dir` ends with a count of the events
+that have reached the mod since it loaded: session start, conversation start,
+prompts, tool calls, stops and refresh ticks. A zero beside prompts you have
+typed, or tool calls Claude has made, is an event being sent past the mod.
+The same answer, and the pane, say when the plans folder itself cannot be
+read, with the reason.
+
 ## Where plans are kept
 
 With nothing set, plans are in `docs/plans/` in the folder the session runs

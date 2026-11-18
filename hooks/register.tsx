@@ -9,6 +9,7 @@ import {
   configuredDir,
   contextText,
   folderText,
+  homeFrom,
   isAbsolute,
   isOpen,
   ordered,
@@ -54,6 +55,8 @@ const startSeenAtom = atom({ plugin: 'wp', key: 'sessionStartAt' } as const, 0)
 const startStoppedAtom = atom({ plugin: 'wp', key: 'isStartStopped' } as const, false)
 /** A skill was typed and its `classic.UserPromptSubmit` did not reach the mod. */
 const promptStoppedAtom = atom({ plugin: 'wp', key: 'isPromptStopped' } as const, false)
+/** What is wrong with reading the plans folder, for the pane to say; null when nothing is. */
+const readErrorAtom = atom({ plugin: 'wp', key: 'readError' } as const, null, { shape: 'readError-1' })
 /** `$.store`: whether the pane was put away, kept from one session to the next. */
 const HIDDEN_KEY = 'isPaneHidden'
 
@@ -81,7 +84,14 @@ let lookedAt = 0
 let listedDir = ''
 /** The `plansDir` option: the folder's name where no workspace says otherwise. Set when the mod loads. */
 let defaultDir = PLAN_DIR
-let home: string | undefined
+let knownHome: string | undefined
+/** Plan files whose last read failed. */
+const unread = new Set<string>()
+/**
+ * How many times each kind of event has reached the mod since it loaded. `/plans-dir` prints them: on a machine
+ * where a hook ahead of the mod's sends events past it, this says which ones.
+ */
+const reached = { sessionStart: 0, conversationStart: 0, prompt: 0, toolCall: 0, stop: 0, tick: 0 }
 /** Config files already complained about, so each is named once. */
 const badConfigs = new Set<string>()
 /**
@@ -225,6 +235,42 @@ async function configAt($: Engine, file: string): Promise<string | null> {
  * phase working in a worktree (`<repo>/.claude/worktrees/<name>`) still finds
  * the plans above it. The folder last found is kept when a later place has none.
  */
+/**
+ * The person's home folder, for a plans folder written with `~`: from the
+ * environment, and where that cannot be read (a security mod may keep it from
+ * a person's own mods) from where the session and the mod's own files sit.
+ * Kept once known, asked again while it is not.
+ */
+async function homeDir($: Engine, starts: readonly string[]): Promise<string> {
+  if (knownHome) return knownHome
+  let found = ''
+  try {
+    found = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE')) ?? ''
+  } catch {
+    found = ''
+  }
+  if (!found) {
+    let root = ''
+    try {
+      root = $.plugin.root
+    } catch {
+      root = ''
+    }
+    found = homeFrom([...starts, root])
+  }
+  if (found) knownHome = found
+  return found
+}
+
+/** Says what is wrong with reading the plans folder, or that nothing is; written only when that changes. */
+async function setReadError($: Engine, said: string | null): Promise<void> {
+  try {
+    if ((await read($, readErrorAtom)) !== said) await update($, readErrorAtom, () => said)
+  } catch {
+    // Saying so must never get in the way of the read.
+  }
+}
+
 async function findPlace($: Engine, isForced = false): Promise<Place> {
   let starts: string[]
   try {
@@ -243,13 +289,7 @@ async function findPlace($: Engine, isForced = false): Promise<Place> {
   if (place && isFresh && !isForced) return place
   lookedFrom = key
   lookedAt = now
-  if (home === undefined) {
-    try {
-      home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE')) ?? ''
-    } catch {
-      home = ''
-    }
-  }
+  const home = await homeDir($, starts)
   /** The session's directories and the folders above each, nearest first. */
   const above: string[] = []
   for (const start of starts) {
@@ -279,7 +319,7 @@ async function refresh($: Engine): Promise<Plan[]> {
   let entries: { name: string; kind: string; mtimeMs: number }[] = []
   try {
     entries = await $.fs.list(dir)
-  } catch {
+  } catch (err) {
     // The folder is not there. Where it is the one the plans on show came from (the session has moved), they
     // stay on show; where it is another (the workspace now names a folder not made yet), there are none.
     if (listedDir && dir !== listedDir) {
@@ -287,6 +327,15 @@ async function refresh($: Engine): Promise<Plan[]> {
       cache.clear()
       await update($, plansAtom, () => [])
     }
+    // A folder not made yet is no fault. One that is there and cannot be read is, and so is one whose `~`
+    // could not be made into a path: the pane says which, where it would otherwise only stay empty.
+    const why = err instanceof Error ? err.message : String(err)
+    const said = dir.startsWith('~')
+      ? 'starts with ~, and your home folder could not be worked out here: give the folder in full'
+      : (await exists($, dir))
+        ? `is there and could not be read: ${why}`
+        : null
+    await setReadError($, said)
     await showStatus($)
     return read($, plansAtom)
   }
@@ -298,6 +347,7 @@ async function refresh($: Engine): Promise<Plan[]> {
   const files = entries.filter(f => f.kind === 'file' && f.name.endsWith('.md') && !NOT_PLANS.has(f.name))
   let changed = hasMoved || files.length !== cache.size || files.some(f => !cache.has(f.name))
   const plans: Plan[] = []
+  let stuck = ''
   for (const file of files) {
     const known = cache.get(file.name)
     if (known && known.mtimeMs === file.mtimeMs) {
@@ -310,11 +360,15 @@ async function refresh($: Engine): Promise<Plan[]> {
       cache.set(file.name, plan)
       plans.push(plan)
       changed = true
-    } catch {
-      // A file being rewritten right now is read on the next tick.
+      unread.delete(file.name)
+    } catch (err) {
+      // A file being rewritten right now is read on the next tick. One that fails twice running is not that.
+      if (unread.has(file.name)) stuck ||= `${file.name}: ${err instanceof Error ? err.message : String(err)}`
+      unread.add(file.name)
     }
   }
   for (const name of [...cache.keys()]) if (!files.some(f => f.name === name)) cache.delete(name)
+  await setReadError($, stuck ? `holds a plan that could not be read (${stuck})` : null)
   if (changed) await update($, plansAtom, () => plans)
   await showStatus($)
   return changed ? plans : await read($, plansAtom)
@@ -415,6 +469,7 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
+    reached.sessionStart++
     sessionStartedAt = await $.clock.now()
     // Each command is registered on its own: a name someone else's mod already holds costs that command only,
     // and the pane, its buttons and the rest still come up.
@@ -453,6 +508,7 @@ export const register: Register = (on, options) => {
     timer?.cancel()
     try {
       timer = $.clock.every(REFRESH_MS, () => {
+        reached.tick++
         void refresh($).catch(() => undefined)
       })
     } catch {
@@ -558,7 +614,19 @@ export const register: Register = (on, options) => {
     const warning = (await areHooksStopped($))
       ? `\nAnother hook is stopping waypoint's session hooks, so Claude is not told this folder: say it when you run a skill.`
       : ''
-    return { text: wrote + whereText(found, await countPlans($, found.dir)) + warning }
+    let unreadable = ''
+    try {
+      const said = await read($, readErrorAtom)
+      unreadable = said ? `\nThe plans folder ${said}.` : ''
+    } catch {
+      unreadable = ''
+    }
+    // Which events have reached the mod: where a hook ahead of it sends some past it, these are the facts to
+    // work from. A zero beside prompts that were typed, or tool calls that were made, is an event stopped.
+    const events =
+      `\nReached the mod since it loaded: session start ${reached.sessionStart}, conversation start ${reached.conversationStart}, ` +
+      `prompts ${reached.prompt}, tool calls ${reached.toolCall}, stops ${reached.stop}, refresh ticks ${reached.tick}.`
+    return { text: wrote + whereText(found, await countPlans($, found.dir)) + unreadable + warning + events }
   })
 
   // A skill of the mod's typed by the person: its `classic.UserPromptSubmit` should reach the mod as well. Where
@@ -571,6 +639,9 @@ export const register: Register = (on, options) => {
         $.clock.after(PROMPT_WAIT_MS, () => {
           if (lastSkillPromptAt < typedAt - PROMPT_WAIT_MS) void hooksStopped($, 'prompt')
         })
+        // The pane follows the plan the person named, whether or not the prompt's own hook gets to say so.
+        const name = /^[\w.-]+/.exec((e.args ?? '').trim())?.[0]
+        if (name) await follow($, name)
       }
     } catch {
       // Keeping watch must never get in the way of a command.
@@ -602,6 +673,7 @@ export const register: Register = (on, options) => {
   // <plan>" is enough. With none open it is told the folder alone, where a
   // workspace or the option has set one: the skills cannot work that out.
   on('classic.SessionStart', async ($, e, next) => {
+    reached.conversationStart++
     await hookReached($, 'start')
     const result = await next(e)
     await findSkills($)
@@ -618,6 +690,7 @@ export const register: Register = (on, options) => {
   // the plan and phase skills title it after the plan and phase. The skill is
   // told the plans folder with it. Claude Code's own `/plan` is none of this.
   on('classic.UserPromptSubmit', async ($, e, next) => {
+    reached.prompt++
     const m = SKILL_PROMPT.exec(e.prompt)
     if (m) await findSkills($)
     const kind = m ? skillOf(m[1]!) : undefined
@@ -645,6 +718,7 @@ export const register: Register = (on, options) => {
 
   // Note code edits, and follow the plan a session writes to.
   on('tool.call', async ($, e, next) => {
+    reached.toolCall++
     const ran = await next(e)
     try {
       const path =
@@ -669,6 +743,7 @@ export const register: Register = (on, options) => {
   // When Claude says a phase is done but its plan is older than the work,
   // send it back once to update the plan.
   on('classic.Stop', async ($, e, next) => {
+    reached.stop++
     const result = await next(e)
     if (e.stop_hook_active || result.block) return result
     const current = await read($, currentAtom)
@@ -725,11 +800,21 @@ export const register: Register = (on, options) => {
           <Text dimColor wrap="wrap">Say that folder to Claude when you run a skill.</Text>
         </Box>
       ) : null
+    // A folder that cannot be read leaves the pane as it was, or empty: say that it is so, and why.
+    const readError = await read($, readErrorAtom)
+    const unreadable = readError ? (
+      <Box marginBottom={1}>
+        <Text color="red" wrap="wrap">
+          The plans folder {place?.dir ?? defaultDir}/ {readError}. /{WHERE} says more.
+        </Text>
+      </Box>
+    ) : null
 
     if (!plans.length) {
       return (
         <Box flexDirection="column">
           {warning}
+          {unreadable}
           <Text dimColor wrap="wrap">No plans in {tailOf(place?.dir ?? defaultDir)}/ yet.</Text>
           <Text dimColor>Start one with /{skill.plan} &lt;name&gt;.</Text>
         </Box>
@@ -742,6 +827,7 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="column">
         {warning}
+        {unreadable}
         <Box>
           <Button key="hide-plans" label="hide" onPress={() => void setHidden($, true)} />
           <Text dimColor> or /plans</Text>
