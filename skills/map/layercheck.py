@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 jjoneson. From waypoint: https://github.com/jjoneson/claude-waypoint
 """Checks every import in a source tree against the module map in docs/architecture.md.
 
     python3 layercheck.py                  check, from the repository's top folder

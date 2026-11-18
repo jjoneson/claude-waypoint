@@ -319,8 +319,13 @@ python3 -m unittest discover -s tests -p 'test_*.py'    # the import check's tes
 claude --plugin-dir .        # a session with this folder's copy loaded
 ```
 
-- `hooks/register.tsx`: the hooks, the pane and the two commands.
+- `hooks/register.tsx`: the hooks, the pane and the three commands.
 - `hooks/plans.ts`: reading a plan file; no engine calls, so it is easy to test.
 - `types/index.d.ts`: what the mod keeps in the session's state.
 - `skills/`: the six skills, plain Markdown; `skills/map/layercheck.py` is the import check.
 - `agents/`: the two agent types.
+
+## Licence
+
+MIT: see [LICENSE](LICENSE). The copy of `layercheck.py` that the map skill
+puts in your repository carries the same licence in its first lines.
