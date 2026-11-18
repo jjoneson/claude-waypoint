@@ -20,9 +20,11 @@ you make.
 1. **Name the plan.** Use the first argument as the file name, in kebab-case:
    `<name>.md` in the plans folder. If that file exists, this is a revision: read it
    and change only what the user wants changed.
-2. **Learn just enough.** Start from the project's CLAUDE.md and README. If
-   you need a map of the code, send one Explore agent rather than reading
-   broadly yourself.
+2. **Learn just enough.** Start from the project's maps where it has them:
+   the area table in CLAUDE.md, and the rows of `docs/architecture.md` the
+   work touches (this plugin's `map` skill writes both). If you need more of
+   a map of the code, send one `scout` agent rather than reading broadly
+   yourself.
 3. **Agree the plan with the user.** Ask only the questions whose answers
    change the plan, with real options and a recommendation (AskUserQuestion
    for real choices). Cover the goal, the phases, and how each phase is proved.

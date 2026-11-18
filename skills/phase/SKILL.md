@@ -33,8 +33,11 @@ with no such file, the nearest `docs/plans/` folder at or above it.
    started right away, so the Plans pane shows it: the heading becomes
    `### N. Name: in progress`, the header gets `status: active` and `updated`
    gets today's date.
-5. **Do the phase,** following CLAUDE.md. Work towards its "Done when" and run
-   what its "Proved by" names. Stay inside the phase: anything out of scope
+5. **Do the phase,** following CLAUDE.md. Find your way from its area table
+   and `docs/architecture.md` where the project has them, and send a `scout`
+   agent for a map of code you don't know. Work towards the phase's "Done
+   when" and run what its "Proved by" names, through a `checker` agent where
+   a check's output is long. Stay inside the phase: anything out of scope
    goes under Open questions, or becomes a later phase, rather than being done
    now.
 6. **If the user's eyes are the proof** (a screenshot, a try-out), stop and
